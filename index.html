@@ -56,6 +56,16 @@ button { color: inherit; }
 .era-picker { margin: 14px 0 18px; padding: 14px 15px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); }
 .era-picker label { display: block; margin-bottom: 7px; font-size: .84rem; font-weight: 800; color: var(--muted); }
 .era-picker select { width: 100%; min-height: 48px; padding: 10px 13px; border: 2px solid #eadbd3; border-radius: 14px; background: #fff; color: var(--ink); font-weight: 800; }
+.era-check-panel { padding: 16px; border: 1px solid var(--line); border-radius: 22px; background: var(--paper); box-shadow: var(--shadow); }
+.era-check-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.era-check-tools .secondary { min-height: 44px; padding: 8px 10px; }
+.era-check-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
+.era-check { display: flex; align-items: center; gap: 9px; min-height: 62px; padding: 10px; border: 2px solid var(--line); border-radius: 15px; background: white; cursor: pointer; }
+.era-check:has(input:checked) { border-color: var(--pink-deep); background: #fff1ee; }
+.era-check input { width: 21px; height: 21px; flex: none; accent-color: var(--pink-deep); }
+.era-check b, .era-check small { display: block; }
+.era-check b { font-size: .92rem; }
+.era-check small { margin-top: 3px; color: var(--muted); font-size: .75rem; }
 .mode-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .mode-card { min-height: 134px; padding: 16px; border: 1px solid var(--line); border-radius: 22px; background: var(--paper); box-shadow: 0 5px 14px rgba(103,75,64,.06); text-align: left; cursor: pointer; transition: transform .16s, box-shadow .16s; }
 .mode-card:active { transform: scale(.98); }
@@ -144,6 +154,7 @@ button { color: inherit; }
   .hero p { font-size: .8rem; }
   .mode-card { min-height: 128px; padding: 14px; }
   .timeline-item { grid-template-columns: 66px 1fr auto; }
+  .era-check-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 
@@ -184,7 +195,7 @@ const state = {
   data: [], screen: 'home', current: null, choices: [], answered: false,
   questionNo: 1, sortCards: [], sortOrder: [],
   learned: new Set(JSON.parse(localStorage.getItem('historyCatLearned') || '[]').map(String)),
-  era: localStorage.getItem('historyCatEra') || 'all',
+  selectedEras: (() => { try { return JSON.parse(localStorage.getItem('historyCatEras') || '[]'); } catch { return []; } })(),
   effects: localStorage.getItem('historyCatEffects') !== 'false',
   speech: localStorage.getItem('historyCatSpeech') !== 'false'
 };
@@ -232,19 +243,26 @@ function toggleLearned(no, force) {
   const key = String(no); const next = force ?? !state.learned.has(key);
   next ? state.learned.add(key) : state.learned.delete(key); saveLearned();
 }
-function inEra(item, era = state.era) {
-  if (era === 'all') return true;
+function matchesEra(item, era) {
   if (era === '__unclassified') return !item['時代']?.trim();
   return item['時代']?.trim() === era;
+}
+function inEra(item, eras = state.selectedEras) {
+  return !eras.length || eras.some(era => matchesEra(item, era));
 }
 function eraPool() { return state.data.filter(x => inEra(x)); }
 function eraOptions() {
   const values = [...new Set(state.data.map(x => x['時代']?.trim()).filter(Boolean))];
-  const options = [['all', '全時代'], ...values.map(v => [v, v])];
+  const options = values.map(v => [v, v]);
   if (state.data.some(x => !x['時代']?.trim())) options.push(['__unclassified', '時代未入力']);
   return options;
 }
-function eraName() { return eraOptions().find(([key]) => key === state.era)?.[1] || '全時代'; }
+function eraName() {
+  const options = eraOptions();
+  if (!state.selectedEras.length || state.selectedEras.length === options.length) return '全時代';
+  const names = options.filter(([key]) => state.selectedEras.includes(key)).map(([,label]) => label);
+  return names.length <= 2 ? names.join('・') : `${names.length}つの時代`;
+}
 function unlearnedPool() { const all = eraPool(); const p = all.filter(x => !state.learned.has(itemId(x))); return p.length ? p : all; }
 function mnemonicSpeech(item) { return item['読み上げ']?.trim() || item['暗記法'] || ''; }
 function badges(item) {
@@ -255,30 +273,54 @@ function setNav(active) { $$('.bottom-nav button').forEach(b => b.classList.togg
 function go(name) {
   speechSynthesis?.cancel(); state.screen = name; state.answered = false; window.scrollTo({top:0, behavior:'smooth'});
   if (name === 'home') renderHome();
-  if (name === 'eventYear') newEventYear();
-  if (name === 'yearEvent') newYearEvent();
-  if (name === 'sort') newSort();
   if (name === 'list') renderList('all');
   if (name === 'learned') renderList('learned');
 }
 
 function renderHome() {
   setNav('home'); const learned = state.learned.size; const pct = Math.round(learned / state.data.length * 100);
-  const eras = eraOptions();
-  if (!eras.some(([key]) => key === state.era)) { state.era = 'all'; localStorage.setItem('historyCatEra', 'all'); }
   screen.innerHTML = `
     <section class="hero"><div><h1>さあ、歴史の旅へ！</h1><p>ねこと一緒に、できごとと年代を少しずつ覚えよう。</p></div><img src="assets/history-cats.png" alt="巻物や地図を持った歴史ねこたち"></section>
     <section class="progress-card"><div class="progress-ring">${pct}%</div><div><b>${learned}／${state.data.length}問 覚えた</b><small>今日も自分のペースで進もう</small></div><div class="progress-bar" aria-label="学習進捗"><i style="width:${pct}%"></i></div></section>
     <div class="section-title"><h2>学習する</h2><small>覚えていない問題から出題</small></div>
-    <div class="era-picker"><label for="eraSelect">出題する時代（CSVのC列）</label><select id="eraSelect">${eras.map(([key,label])=>`<option value="${esc(key)}" ${state.era===key?'selected':''}>${esc(label)}（${state.data.filter(x=>inEra(x,key)).length}問）</option>`).join('')}</select></div>
     <div class="mode-grid">
       <button class="mode-card" data-mode="eventYear"><span class="mode-icon">📜</span><b>できごと → 年代</b><small>年代を入力して答えよう</small></button>
       <button class="mode-card" data-mode="yearEvent"><span class="mode-icon">⏳</span><b>年代 → できごと</b><small>正しいできごとを4択</small></button>
       <button class="mode-card" data-mode="sort"><span class="mode-icon">↕</span><b>順番に並べる</b><small>古い順に4つをタップ</small></button>
       <button class="mode-card wide" data-mode="list"><span class="mode-icon">📚</span><span><b>年代リスト</b><small>全${state.data.length}件をサーッと確認</small></span><span class="arrow">›</span></button>
     </div>`;
-  $$('[data-mode]').forEach(b => b.onclick = () => go(b.dataset.mode));
-  $('#eraSelect').onchange = e => { state.era=e.target.value; localStorage.setItem('historyCatEra',state.era); renderHome(); };
+  $$('[data-mode]').forEach(b => b.onclick = () => b.dataset.mode === 'list' ? go('list') : renderEraSelection(b.dataset.mode));
+}
+
+function renderEraSelection(mode) {
+  setNav(''); window.scrollTo({top:0, behavior:'smooth'});
+  const options = eraOptions();
+  const valid = state.selectedEras.filter(key => options.some(([optionKey]) => optionKey === key));
+  const checked = valid.length ? valid : options.map(([key]) => key);
+  const titles = { eventYear:'できごと → 年代', yearEvent:'年代 → できごと', sort:'順番に並べる' };
+  screen.innerHTML = questionHead('出題する時代を選ぶ', titles[mode]) + `
+    <p class="sort-help">CSVのC列で区分しています。複数選べます。</p>
+    <section class="era-check-panel">
+      <div class="era-check-tools"><button type="button" id="selectAllEras" class="secondary">すべて選択</button><button type="button" id="clearAllEras" class="secondary">すべて解除</button></div>
+      <div class="era-check-grid">${options.map(([key,label])=>`<label class="era-check"><input type="checkbox" value="${esc(key)}" ${checked.includes(key)?'checked':''}><span><b>${esc(label)}</b><small>${state.data.filter(item=>matchesEra(item,key)).length}問</small></span></label>`).join('')}</div>
+      <button type="button" id="startSelectedMode" class="primary full">この範囲で始める</button>
+    </section>`;
+  bindGo();
+  const boxes = () => $$('.era-check input');
+  const update = () => { $('#startSelectedMode').disabled = !boxes().some(box => box.checked); };
+  boxes().forEach(box => box.onchange = update);
+  $('#selectAllEras').onclick = () => { boxes().forEach(box => box.checked=true); update(); };
+  $('#clearAllEras').onclick = () => { boxes().forEach(box => box.checked=false); update(); };
+  $('#startSelectedMode').onclick = () => {
+    state.selectedEras = boxes().filter(box => box.checked).map(box => box.value);
+    if (!state.selectedEras.length) return;
+    localStorage.setItem('historyCatEras', JSON.stringify(state.selectedEras));
+    state.screen = mode; state.questionNo = 1; state.answered = false;
+    if (mode === 'eventYear') newEventYear();
+    if (mode === 'yearEvent') newYearEvent();
+    if (mode === 'sort') newSort();
+  };
+  update();
 }
 
 function questionHead(title, subtitle) {
