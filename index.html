@@ -31,7 +31,7 @@ button { color: inherit; }
 .loading { min-height: 100vh; display: grid; place-items: center; font-weight: 700; }
 .loading-paw { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 50%; background: #f5c8bf; font-size: 1.5rem; animation: pawPulse .8s ease-in-out infinite alternate; }
 @keyframes pawPulse { to { transform: scale(1.08); opacity: .65; } }
-.app { width: min(100%, 720px); min-height: 100vh; margin: auto; background: rgba(255,255,255,.58); box-shadow: 0 0 40px rgba(94,74,67,.08); padding-bottom: 88px; }
+.app { width: min(100%, 720px); min-height: 100vh; margin: auto; background: rgba(255,255,255,.58); box-shadow: 0 0 40px rgba(94,74,67,.08); padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: max(12px, env(safe-area-inset-top)) 16px 10px; background: rgba(255,253,249,.92); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(234,219,211,.8); }
 .brand { display: flex; align-items: center; gap: 9px; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; }
 .brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: var(--pink); font-size: 20px; }
@@ -39,7 +39,7 @@ button { color: inherit; }
 .brand strong { font-size: 1rem; letter-spacing: .03em; }
 .brand small { margin-top: 1px; color: var(--muted); font-size: .7rem; }
 .icon-button, .close-button { width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 50%; background: #fff; cursor: pointer; }
-#screen { padding: 18px 16px 30px; }
+#screen { padding: 18px 16px calc(150px + env(safe-area-inset-bottom)); }
 .hero { position: relative; overflow: hidden; display: grid; grid-template-columns: 1.05fr .95fr; align-items: center; min-height: 184px; padding: 22px; border: 2px solid #f0d5cb; border-radius: 28px; background: linear-gradient(135deg, #fff9ee, #fdeae7); box-shadow: var(--shadow); }
 .hero h1 { margin: 0 0 8px; font-size: clamp(1.45rem, 5vw, 2rem); line-height: 1.35; }
 .hero p { margin: 0; font-size: .9rem; line-height: 1.65; color: var(--muted); }
@@ -349,8 +349,9 @@ function newEventYear() {
 function normalizeYear(v) { return String(v).trim().toUpperCase().replace(/[Ａ-Ｚａ-ｚ０-９．]/g, s => String.fromCharCode(s.charCodeAt(0)-0xFEE0)).replace(/\s/g,'').replace(/紀元前/i,'B.C.'); }
 function checkEventYear() {
   if (state.answered) return; const input = normalizeYear($('#yearAnswer').value); if (!input) return;
-  state.answered = true; const ok = input === normalizeYear(state.current['年代']); playSound(ok);
+  state.answered = true; const ok = input === normalizeYear(state.current['年代']);
   showResult($('#resultArea'), ok, state.current, newEventYear); $('#yearAnswer').disabled = true; $('#checkYear').disabled = true;
+  playSound(ok);
 }
 
 function newYearEvent() {
@@ -372,6 +373,7 @@ function newYearEvent() {
     checkButton.dataset.selected = choice.dataset.no;
     checkButton.disabled = false;
     checkButton.textContent = '答え合わせ';
+    checkButton.scrollIntoView({behavior:'smooth', block:'center'});
   });
   checkButton.addEventListener('click', () => {
     const chosen = checkButton.dataset.selected;
@@ -379,11 +381,11 @@ function newYearEvent() {
     state.answered = true;
     const correctId = itemId(state.current);
     const ok = chosen === correctId;
-    playSound(ok);
     $$('.choice').forEach(button => button.classList.add(button.dataset.no === correctId ? 'correct' : (button.dataset.no === chosen ? 'wrong' : '')));
     checkButton.disabled = true;
     showResult($('#resultArea'), ok, state.current, newYearEvent);
     $('#resultArea').scrollIntoView({behavior:'smooth', block:'nearest'});
+    playSound(ok);
   });
 }
 
@@ -416,13 +418,14 @@ function sortKey(x) {
 function checkSort() {
   if (state.answered || state.sortOrder.length !== 4) return; state.answered=true;
   const correct=[...state.sortCards].sort((a,b)=>sortKey(a)-sortKey(b)||(Number(a['番号'])||9999)-(Number(b['番号'])||9999));
-  const ok=correct.every((x,i)=>itemId(x)===state.sortOrder[i]); playSound(ok);
+  const ok=correct.every((x,i)=>itemId(x)===state.sortOrder[i]);
   const area=$('#resultArea'); area.innerHTML=`<div class="result ${ok?'correct':'wrong'}"><div class="result-title">${ok?'◎ 正解！':'△ おしい！ 正しい順番はこちら'}</div><div class="correct-order">${correct.map((x,i)=>`<div><b>${i+1}. ${esc(yearLabel(x['年代']))}</b>　${esc(x['できごと'])}<br><small>覚え方：${esc(x['暗記法']||'—')}</small></div>`).join('')}</div><div class="result-actions single"><button id="nextSort" class="primary">次の問題</button></div></div>`;
   $('#nextSort').onclick=()=>{window.speechSynthesis?.cancel();state.questionNo++;newSort();};
+  playSound(ok);
 }
 
 function showResult(area, ok, item, nextQuestion) {
-  area.innerHTML=`<div class="result ${ok?'correct':'wrong'}"><div class="result-title">${ok?'◎ 正解！':'△ おしい！'}</div><p><b>${esc(yearLabel(item['年代']))}</b>　${esc(item['できごと'])}</p><p class="mnemonic"><b>覚え方</b><br>${esc(item['暗記法']||'—')}</p><label class="learn-check"><input id="learnToggle" type="checkbox" ${state.learned.has(itemId(item))?'checked':''}>この問題は覚えた！</label><div class="result-actions"><button id="speakOne" class="secondary">🔊 暗記法を聞く</button><button id="nextQuestion" class="primary">次の問題</button></div></div>`;
+  area.innerHTML=`<div class="result ${ok?'correct':'wrong'}"><div class="result-title">${ok?'◎ 正解！':'△ おしい！'}</div><p><b>${esc(yearLabel(item['年代']))}</b>　${esc(item['できごと'])}</p><p class="mnemonic"><b>覚え方</b><br>${esc(item['暗記法']||'—')}</p><label class="learn-check"><input id="learnToggle" type="checkbox" ${state.learned.has(itemId(item))?'checked':''}>この問題は覚えた！</label><div class="result-actions"><button type="button" id="speakOne" class="secondary">🔊 暗記法を聞く</button><button type="button" id="nextQuestion" class="primary">次の問題</button></div></div>`;
   $('#learnToggle').onchange=e=>toggleLearned(itemId(item),e.target.checked); $('#speakOne').onclick=()=>speak(mnemonicSpeech(item)); $('#nextQuestion').onclick=e=>{e.preventDefault();window.speechSynthesis?.cancel();state.questionNo++;nextQuestion();}; if(state.speech) setTimeout(()=>$('#speakOne')?.click(),250);
 }
 
@@ -441,9 +444,14 @@ function drawList(query, filter) {
 }
 
 function playSound(correct) {
-  if(!state.effects)return; const C=window.AudioContext||window.webkitAudioContext; if(!C)return; const ctx=new C(); const now=ctx.currentTime;
-  const tone=(freq,start,duration,type='sine')=>{const o=ctx.createOscillator(),g=ctx.createGain();o.type=type;o.frequency.setValueAtTime(freq,now+start);g.gain.setValueAtTime(.0001,now+start);g.gain.exponentialRampToValueAtTime(.16,now+start+.015);g.gain.exponentialRampToValueAtTime(.0001,now+start+duration);o.connect(g).connect(ctx.destination);o.start(now+start);o.stop(now+start+duration+.02);};
-  if(correct){tone(660,0,.18);tone(880,.15,.28);}else{tone(260,0,.18,'triangle');tone(196,.16,.3,'triangle');} setTimeout(()=>ctx.close(),700);
+  if(!state.effects)return;
+  try {
+    const C=window.AudioContext||window.webkitAudioContext; if(!C)return; const ctx=new C(); const now=ctx.currentTime;
+    const tone=(freq,start,duration,type='sine')=>{const o=ctx.createOscillator(),g=ctx.createGain();o.type=type;o.frequency.setValueAtTime(freq,now+start);g.gain.setValueAtTime(.0001,now+start);g.gain.exponentialRampToValueAtTime(.16,now+start+.015);g.gain.exponentialRampToValueAtTime(.0001,now+start+duration);o.connect(g).connect(ctx.destination);o.start(now+start);o.stop(now+start+duration+.02);};
+    if(correct){tone(660,0,.18);tone(880,.15,.28);}else{tone(260,0,.18,'triangle');tone(196,.16,.3,'triangle');} setTimeout(()=>ctx.close(),700);
+  } catch (_) {
+    // iPhoneなどで音声機能が拒否されても、学習画面の進行は止めない。
+  }
 }
 function speak(text) { if(!window.speechSynthesis || !window.SpeechSynthesisUtterance)return; window.speechSynthesis.cancel(); const u=new window.SpeechSynthesisUtterance(text);u.lang='ja-JP';u.rate=.9;u.pitch=1.08;window.speechSynthesis.speak(u); }
 function bindGo(){ $$('[data-go]',screen).forEach(b=>b.onclick=()=>go(b.dataset.go)); }
