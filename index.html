@@ -264,6 +264,17 @@ function eraName() {
   return names.length <= 2 ? names.join('・') : `${names.length}つの時代`;
 }
 function unlearnedPool() { const all = eraPool(); const p = all.filter(x => !state.learned.has(itemId(x))); return p.length ? p : all; }
+function pickNextQuestion() {
+  const previousId = state.current ? itemId(state.current) : null;
+  const preferred = unlearnedPool();
+  let candidates = preferred.filter(item => itemId(item) !== previousId);
+  if (!candidates.length) candidates = eraPool().filter(item => itemId(item) !== previousId);
+  return randomItem(candidates.length ? candidates : preferred);
+}
+function resetQuestionScroll() {
+  window.scrollTo(0, 0);
+  window.requestAnimationFrame?.(() => window.scrollTo(0, 0));
+}
 function mnemonicSpeech(item) { return item['読み上げ']?.trim() || item['暗記法'] || ''; }
 function badges(item) {
   return `<span class="badge">教 ${esc(item['教'])}</span>${item['入試'] ? `<span class="badge exam">入試 ${esc(item['入試'])}</span>` : ''}`;
@@ -315,7 +326,7 @@ function renderEraSelection(mode) {
     state.selectedEras = boxes().filter(box => box.checked).map(box => box.value);
     if (!state.selectedEras.length) return;
     localStorage.setItem('historyCatEras', JSON.stringify(state.selectedEras));
-    state.screen = mode; state.questionNo = 1; state.answered = false;
+    state.screen = mode; state.questionNo = 1; state.answered = false; state.current = null;
     if (mode === 'eventYear') newEventYear();
     if (mode === 'yearEvent') newYearEvent();
     if (mode === 'sort') newSort();
@@ -327,13 +338,13 @@ function questionHead(title, subtitle) {
   return `<div class="page-head"><button class="back" data-go="home" aria-label="戻る">‹</button><div><h1>${title}</h1><small>${subtitle}</small></div></div>`;
 }
 function newEventYear() {
-  setNav(''); state.current = randomItem(unlearnedPool()); state.answered = false;
+  setNav(''); state.current = pickNextQuestion(); state.answered = false;
   screen.innerHTML = questionHead('できごと → 年代', `${eraName()}・第${state.questionNo}問`) + `
     <section class="question-card"><div class="question-top"><span class="count">このできごとは何年？</span><span class="badges">${badges(state.current)}</span></div>
     <p class="event-text">${esc(state.current['できごと'])}</p>
     <div class="answer-row"><input id="yearAnswer" class="year-input" inputmode="text" autocomplete="off" placeholder="年代を入力"><button id="checkYear" class="primary">答え合わせ</button></div>
     <div id="resultArea"></div></section>`;
-  bindGo(); $('#checkYear').onclick = checkEventYear; $('#yearAnswer').addEventListener('keydown', e => { if (e.key === 'Enter') checkEventYear(); }); $('#yearAnswer').focus();
+  bindGo(); resetQuestionScroll(); $('#checkYear').onclick = checkEventYear; $('#yearAnswer').addEventListener('keydown', e => { if (e.key === 'Enter') checkEventYear(); }); $('#yearAnswer').focus();
 }
 function normalizeYear(v) { return String(v).trim().toUpperCase().replace(/[Ａ-Ｚａ-ｚ０-９．]/g, s => String.fromCharCode(s.charCodeAt(0)-0xFEE0)).replace(/\s/g,'').replace(/紀元前/i,'B.C.'); }
 function checkEventYear() {
@@ -343,7 +354,7 @@ function checkEventYear() {
 }
 
 function newYearEvent() {
-  setNav(''); state.current = randomItem(unlearnedPool()); state.answered = false;
+  setNav(''); state.current = pickNextQuestion(); state.answered = false;
   const sameEra = shuffle(eraPool().filter(x => itemId(x) !== itemId(state.current) && x['できごと'] !== state.current['できごと']));
   const fallback = shuffle(state.data.filter(x => itemId(x) !== itemId(state.current) && x['できごと'] !== state.current['できごと'] && !sameEra.some(y => itemId(y) === itemId(x))));
   const others = [...sameEra, ...fallback].slice(0,3);
@@ -352,7 +363,7 @@ function newYearEvent() {
     <section class="question-card"><div class="question-top"><span class="count">この年代のできごとは？</span><span class="badges">${badges(state.current)}</span></div>
     <div class="year-display">${esc(yearLabel(state.current['年代']))}</div><div id="eventChoices" class="choices">${state.choices.map(x => `<button type="button" class="choice" data-no="${esc(itemId(x))}">${esc(x['できごと'])}</button>`).join('')}</div>
     <button type="button" id="checkChoice" class="primary full" disabled>できごとを選んでください</button><div id="resultArea"></div></section>`;
-  bindGo();
+  bindGo(); resetQuestionScroll();
   const checkButton = $('#checkChoice');
   $('#eventChoices').addEventListener('click', event => {
     const choice = event.target.closest('.choice');
