@@ -271,7 +271,7 @@ function badges(item) {
 function yearLabel(value) { return /世紀/.test(value) ? value : `${value}年`; }
 function setNav(active) { $$('.bottom-nav button').forEach(b => b.classList.toggle('active', b.dataset.go === active)); }
 function go(name) {
-  speechSynthesis?.cancel(); state.screen = name; state.answered = false; window.scrollTo({top:0, behavior:'smooth'});
+  window.speechSynthesis?.cancel(); state.screen = name; state.answered = false; window.scrollTo({top:0, behavior:'smooth'});
   if (name === 'home') renderHome();
   if (name === 'list') renderList('all');
   if (name === 'learned') renderList('learned');
@@ -407,12 +407,12 @@ function checkSort() {
   const correct=[...state.sortCards].sort((a,b)=>sortKey(a)-sortKey(b)||(Number(a['番号'])||9999)-(Number(b['番号'])||9999));
   const ok=correct.every((x,i)=>itemId(x)===state.sortOrder[i]); playSound(ok);
   const area=$('#resultArea'); area.innerHTML=`<div class="result ${ok?'correct':'wrong'}"><div class="result-title">${ok?'◎ 正解！':'△ おしい！ 正しい順番はこちら'}</div><div class="correct-order">${correct.map((x,i)=>`<div><b>${i+1}. ${esc(yearLabel(x['年代']))}</b>　${esc(x['できごと'])}<br><small>覚え方：${esc(x['暗記法']||'—')}</small></div>`).join('')}</div><div class="result-actions single"><button id="nextSort" class="primary">次の問題</button></div></div>`;
-  $('#nextSort').onclick=()=>{speechSynthesis?.cancel();state.questionNo++;newSort();};
+  $('#nextSort').onclick=()=>{window.speechSynthesis?.cancel();state.questionNo++;newSort();};
 }
 
 function showResult(area, ok, item, nextQuestion) {
   area.innerHTML=`<div class="result ${ok?'correct':'wrong'}"><div class="result-title">${ok?'◎ 正解！':'△ おしい！'}</div><p><b>${esc(yearLabel(item['年代']))}</b>　${esc(item['できごと'])}</p><p class="mnemonic"><b>覚え方</b><br>${esc(item['暗記法']||'—')}</p><label class="learn-check"><input id="learnToggle" type="checkbox" ${state.learned.has(itemId(item))?'checked':''}>この問題は覚えた！</label><div class="result-actions"><button id="speakOne" class="secondary">🔊 暗記法を聞く</button><button id="nextQuestion" class="primary">次の問題</button></div></div>`;
-  $('#learnToggle').onchange=e=>toggleLearned(itemId(item),e.target.checked); $('#speakOne').onclick=()=>speak(mnemonicSpeech(item)); $('#nextQuestion').onclick=e=>{e.preventDefault();e.currentTarget.disabled=true;speechSynthesis?.cancel();state.questionNo++;nextQuestion();}; if(state.speech) setTimeout(()=>$('#speakOne')?.click(),250);
+  $('#learnToggle').onchange=e=>toggleLearned(itemId(item),e.target.checked); $('#speakOne').onclick=()=>speak(mnemonicSpeech(item)); $('#nextQuestion').onclick=e=>{e.preventDefault();window.speechSynthesis?.cancel();state.questionNo++;nextQuestion();}; if(state.speech) setTimeout(()=>$('#speakOne')?.click(),250);
 }
 
 function renderList(mode='all') {
@@ -434,14 +434,14 @@ function playSound(correct) {
   const tone=(freq,start,duration,type='sine')=>{const o=ctx.createOscillator(),g=ctx.createGain();o.type=type;o.frequency.setValueAtTime(freq,now+start);g.gain.setValueAtTime(.0001,now+start);g.gain.exponentialRampToValueAtTime(.16,now+start+.015);g.gain.exponentialRampToValueAtTime(.0001,now+start+duration);o.connect(g).connect(ctx.destination);o.start(now+start);o.stop(now+start+duration+.02);};
   if(correct){tone(660,0,.18);tone(880,.15,.28);}else{tone(260,0,.18,'triangle');tone(196,.16,.3,'triangle');} setTimeout(()=>ctx.close(),700);
 }
-function speak(text) { if(!('speechSynthesis'in window))return; speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(text);u.lang='ja-JP';u.rate=.9;u.pitch=1.08;speechSynthesis.speak(u); }
+function speak(text) { if(!window.speechSynthesis || !window.SpeechSynthesisUtterance)return; window.speechSynthesis.cancel(); const u=new window.SpeechSynthesisUtterance(text);u.lang='ja-JP';u.rate=.9;u.pitch=1.08;window.speechSynthesis.speak(u); }
 function bindGo(){ $$('[data-go]',screen).forEach(b=>b.onclick=()=>go(b.dataset.go)); }
 
 document.addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b&&!screen.contains(b))go(b.dataset.go);});
 $('#soundButton').onclick=()=>$('#settingsDialog').showModal();
 $('#effectToggle').checked=state.effects;$('#speechToggle').checked=state.speech;
 $('#effectToggle').onchange=e=>{state.effects=e.target.checked;localStorage.setItem('historyCatEffects',state.effects);};
-$('#speechToggle').onchange=e=>{state.speech=e.target.checked;localStorage.setItem('historyCatSpeech',state.speech);if(!state.speech)speechSynthesis?.cancel();};
+$('#speechToggle').onchange=e=>{state.speech=e.target.checked;localStorage.setItem('historyCatSpeech',state.speech);if(!state.speech)window.speechSynthesis?.cancel();};
 
 const historyDataPromise = window.__HISTORY_CSV__
   ? Promise.resolve(window.__HISTORY_CSV__)
