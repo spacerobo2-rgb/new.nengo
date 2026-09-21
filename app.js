@@ -1,222 +1,39 @@
-const state = {
-  data: [], screen: 'home', current: null, choices: [], answered: false,
-  questionNo: 1, sortCards: [], sortOrder: [],
-  learned: new Set(JSON.parse(localStorage.getItem('historyCatLearned') || '[]').map(String)),
-  era: localStorage.getItem('historyCatEra') || 'all',
-  effects: localStorage.getItem('historyCatEffects') !== 'false',
-  speech: localStorage.getItem('historyCatSpeech') !== 'false'
-};
-
-const $ = (s, root = document) => root.querySelector(s);
-const $$ = (s, root = document) => [...root.querySelectorAll(s)];
-const screen = $('#screen');
-
-function parseCSV(text) {
-  text = text.replace(/^\uFEFF/, '');
-  const rows = []; let row = [], field = '', quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i], next = text[i + 1];
-    if (c === '"' && quoted && next === '"') { field += '"'; i++; }
-    else if (c === '"') quoted = !quoted;
-    else if (c === ',' && !quoted) { row.push(field); field = ''; }
-    else if ((c === '\n' || c === '\r') && !quoted) {
-      if (c === '\r' && next === '\n') i++;
-      row.push(field); field = '';
-      if (row.some(v => v !== '')) rows.push(row);
-      row = [];
-    } else field += c;
-  }
-  if (field || row.length) { row.push(field); rows.push(row); }
-  const rawHeaders = rows.shift().map(h => h.trim());
-  const seen = {};
-  const headers = rawHeaders.map(h => {
-    seen[h] = (seen[h] || 0) + 1;
-    if (h === '暗記法' && seen[h] === 2) return '読み上げ';
-    return seen[h] === 1 ? h : `${h}_${seen[h]}`;
-  });
-  return rows.map((values, index) => {
-    const item = Object.fromEntries(headers.map((h, i) => [h, values[i] || '']));
-    item.__id = item['番号'].trim() || `row-${index + 1}`;
-    return item;
-  });
-}
-
-function esc(v = '') { return String(v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function randomItem(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-function shuffle(arr) { return [...arr].sort(() => Math.random() - .5); }
-function saveLearned() { localStorage.setItem('historyCatLearned', JSON.stringify([...state.learned])); }
-function itemId(item) { return String(item.__id || item['番号']); }
-function toggleLearned(no, force) {
-  const key = String(no); const next = force ?? !state.learned.has(key);
-  next ? state.learned.add(key) : state.learned.delete(key); saveLearned();
-}
-function inEra(item, era = state.era) {
-  if (era === 'all') return true;
-  if (era === '__unclassified') return !item['時代']?.trim();
-  return item['時代']?.trim() === era;
-}
-function eraPool() { return state.data.filter(x => inEra(x)); }
-function eraOptions() {
-  const values = [...new Set(state.data.map(x => x['時代']?.trim()).filter(Boolean))];
-  const options = [['all', '全時代'], ...values.map(v => [v, v])];
-  if (state.data.some(x => !x['時代']?.trim())) options.push(['__unclassified', '時代未入力']);
-  return options;
-}
-function eraName() { return eraOptions().find(([key]) => key === state.era)?.[1] || '全時代'; }
-function unlearnedPool() { const all = eraPool(); const p = all.filter(x => !state.learned.has(itemId(x))); return p.length ? p : all; }
-function mnemonicSpeech(item) { return item['読み上げ']?.trim() || item['暗記法'] || ''; }
-function badges(item) {
-  return `<span class="badge">教 ${esc(item['教'])}</span>${item['入試'] ? `<span class="badge exam">入試 ${esc(item['入試'])}</span>` : ''}`;
-}
-function yearLabel(value) { return /世紀/.test(value) ? value : `${value}年`; }
-function setNav(active) { $$('.bottom-nav button').forEach(b => b.classList.toggle('active', b.dataset.go === active)); }
-function go(name) {
-  speechSynthesis?.cancel(); state.screen = name; state.answered = false; window.scrollTo({top:0, behavior:'smooth'});
-  if (name === 'home') renderHome();
-  if (name === 'eventYear') newEventYear();
-  if (name === 'yearEvent') newYearEvent();
-  if (name === 'sort') newSort();
-  if (name === 'list') renderList('all');
-  if (name === 'learned') renderList('learned');
-}
-
-function renderHome() {
-  setNav('home'); const learned = state.learned.size; const pct = Math.round(learned / state.data.length * 100);
-  const eras = eraOptions();
-  if (!eras.some(([key]) => key === state.era)) { state.era = 'all'; localStorage.setItem('historyCatEra', 'all'); }
-  screen.innerHTML = `
-    <section class="hero"><div><h1>さあ、歴史の旅へ！</h1><p>ねこと一緒に、できごとと年代を少しずつ覚えよう。</p></div><img src="assets/history-cats.png" alt="巻物や地図を持った歴史ねこたち"></section>
-    <section class="progress-card"><div class="progress-ring">${pct}%</div><div><b>${learned}／${state.data.length}問 覚えた</b><small>今日も自分のペースで進もう</small></div><div class="progress-bar" aria-label="学習進捗"><i style="width:${pct}%"></i></div></section>
-    <div class="section-title"><h2>学習する</h2><small>覚えていない問題から出題</small></div>
-    <div class="era-picker"><label for="eraSelect">出題する時代</label><select id="eraSelect">${eras.map(([key,label])=>`<option value="${esc(key)}" ${state.era===key?'selected':''}>${esc(label)}（${state.data.filter(x=>inEra(x,key)).length}問）</option>`).join('')}</select></div>
-    <div class="mode-grid">
-      <button class="mode-card" data-mode="eventYear"><span class="mode-icon">📜</span><b>できごと → 年代</b><small>年代を入力して答えよう</small></button>
-      <button class="mode-card" data-mode="yearEvent"><span class="mode-icon">⏳</span><b>年代 → できごと</b><small>正しいできごとを4択</small></button>
-      <button class="mode-card" data-mode="sort"><span class="mode-icon">↕</span><b>順番に並べる</b><small>古い順に4つをタップ</small></button>
-      <button class="mode-card wide" data-mode="list"><span class="mode-icon">📚</span><span><b>年代リスト</b><small>全${state.data.length}件をサーッと確認</small></span><span class="arrow">›</span></button>
-    </div>`;
-  $$('[data-mode]').forEach(b => b.onclick = () => go(b.dataset.mode));
-  $('#eraSelect').onchange = e => { state.era=e.target.value; localStorage.setItem('historyCatEra',state.era); renderHome(); };
-}
-
-function questionHead(title, subtitle) {
-  return `<div class="page-head"><button class="back" data-go="home" aria-label="戻る">‹</button><div><h1>${title}</h1><small>${subtitle}</small></div></div>`;
-}
-function newEventYear() {
-  setNav(''); state.current = randomItem(unlearnedPool()); state.answered = false;
-  screen.innerHTML = questionHead('できごと → 年代', `${eraName()}・第${state.questionNo}問`) + `
-    <section class="question-card"><div class="question-top"><span class="count">このできごとは何年？</span><span class="badges">${badges(state.current)}</span></div>
-    <p class="event-text">${esc(state.current['できごと'])}</p>
-    <div class="answer-row"><input id="yearAnswer" class="year-input" inputmode="text" autocomplete="off" placeholder="年代を入力"><button id="checkYear" class="primary">答え合わせ</button></div>
-    <div id="resultArea"></div></section>`;
-  bindGo(); $('#checkYear').onclick = checkEventYear; $('#yearAnswer').addEventListener('keydown', e => { if (e.key === 'Enter') checkEventYear(); }); $('#yearAnswer').focus();
-}
-function normalizeYear(v) { return String(v).trim().toUpperCase().replace(/[Ａ-Ｚａ-ｚ０-９．]/g, s => String.fromCharCode(s.charCodeAt(0)-0xFEE0)).replace(/\s/g,'').replace(/紀元前/i,'B.C.'); }
-function checkEventYear() {
-  if (state.answered) return; const input = normalizeYear($('#yearAnswer').value); if (!input) return;
-  state.answered = true; const ok = input === normalizeYear(state.current['年代']); playSound(ok);
-  showResult($('#resultArea'), ok, state.current, newEventYear); $('#yearAnswer').disabled = true; $('#checkYear').disabled = true;
-}
-
-function newYearEvent() {
-  setNav(''); state.current = randomItem(unlearnedPool()); state.answered = false;
-  const sameEra = shuffle(eraPool().filter(x => itemId(x) !== itemId(state.current) && x['できごと'] !== state.current['できごと']));
-  const fallback = shuffle(state.data.filter(x => itemId(x) !== itemId(state.current) && x['できごと'] !== state.current['できごと'] && !sameEra.some(y => itemId(y) === itemId(x))));
-  const others = [...sameEra, ...fallback].slice(0,3);
-  state.choices = shuffle([state.current, ...others]);
-  screen.innerHTML = questionHead('年代 → できごと', `${eraName()}・第${state.questionNo}問`) + `
-    <section class="question-card"><div class="question-top"><span class="count">この年代のできごとは？</span><span class="badges">${badges(state.current)}</span></div>
-    <div class="year-display">${esc(yearLabel(state.current['年代']))}</div><div id="eventChoices" class="choices">${state.choices.map(x => `<button type="button" class="choice" data-no="${esc(itemId(x))}">${esc(x['できごと'])}</button>`).join('')}</div>
-    <button type="button" id="checkChoice" class="primary full" disabled>できごとを選んでください</button><div id="resultArea"></div></section>`;
-  bindGo();
-  const checkButton = $('#checkChoice');
-  $('#eventChoices').addEventListener('click', event => {
-    const choice = event.target.closest('.choice');
-    if (!choice || state.answered) return;
-    $$('.choice').forEach(button => button.classList.toggle('selected', button === choice));
-    checkButton.dataset.selected = choice.dataset.no;
-    checkButton.disabled = false;
-    checkButton.textContent = '答え合わせ';
-  });
-  checkButton.addEventListener('click', () => {
-    const chosen = checkButton.dataset.selected;
-    if (!chosen || state.answered) return;
-    state.answered = true;
-    const correctId = itemId(state.current);
-    const ok = chosen === correctId;
-    playSound(ok);
-    $$('.choice').forEach(button => button.classList.add(button.dataset.no === correctId ? 'correct' : (button.dataset.no === chosen ? 'wrong' : '')));
-    checkButton.disabled = true;
-    showResult($('#resultArea'), ok, state.current, newYearEvent);
-    $('#resultArea').scrollIntoView({behavior:'smooth', block:'nearest'});
-  });
-}
-
-function newSort() {
-  setNav(''); state.answered = false; state.sortOrder = [];
-  const all = eraPool();
-  if (all.length < 4) {
-    screen.innerHTML = questionHead('順番に並べる', eraName()) + `<div class="empty"><span class="face">ฅ^•ﻌ•^ฅ</span>この時代はまだ${all.length}問です。<br>並べ替えには4問以上必要です。</div><button class="secondary full" data-go="home">時代を選び直す</button>`;
-    bindGo(); return;
-  }
-  const preferred = shuffle(all.filter(x => !state.learned.has(itemId(x))));
-  const rest = shuffle(all.filter(x => state.learned.has(itemId(x))));
-  const source = [...preferred, ...rest].slice(0,4); state.sortCards = shuffle(source);
-  screen.innerHTML = questionHead('順番に並べる', `${eraName()}・4つのできごと`) + `
-    <p class="sort-help">古いと思う順にタップしてください。選び直すときは、もう一度タップすると解除できます。</p>
-    <section class="question-card"><div class="sort-list">${state.sortCards.map(x=>`<button class="sort-card" data-no="${esc(itemId(x))}"><span class="order">−</span>${esc(x['できごと'])}</button>`).join('')}</div>
-    <button id="checkSort" class="primary full" disabled>答え合わせ</button><div id="resultArea"></div></section>`;
-  bindGo(); $$('.sort-card').forEach(b => b.onclick = () => selectSort(b)); $('#checkSort').onclick = checkSort;
-}
-function selectSort(button) {
-  if (state.answered) return; const no = button.dataset.no; const index = state.sortOrder.indexOf(no);
-  if (index >= 0) state.sortOrder.splice(index, 1); else state.sortOrder.push(no);
-  $$('.sort-card').forEach(b => { const i=state.sortOrder.indexOf(b.dataset.no); b.classList.toggle('selected',i>=0); $('.order',b).textContent=i>=0?i+1:'−'; });
-  $('#checkSort').disabled = state.sortOrder.length !== 4;
-}
-function sortKey(x) {
-  const value=x['年代']; if (/B\.C\./i.test(value)) return -parseInt(value.replace(/\D/g,''));
-  if (/世紀/.test(value)) return parseInt(value)*100-99; return parseInt(value)||0;
-}
-function checkSort() {
-  if (state.answered || state.sortOrder.length !== 4) return; state.answered=true;
-  const correct=[...state.sortCards].sort((a,b)=>sortKey(a)-sortKey(b)||(Number(a['番号'])||9999)-(Number(b['番号'])||9999));
-  const ok=correct.every((x,i)=>itemId(x)===state.sortOrder[i]); playSound(ok);
-  const area=$('#resultArea'); area.innerHTML=`<div class="result ${ok?'correct':'wrong'}"><div class="result-title">${ok?'◎ 正解！':'△ おしい！ 正しい順番はこちら'}</div><div class="correct-order">${correct.map((x,i)=>`<div><b>${i+1}. ${esc(yearLabel(x['年代']))}</b>　${esc(x['できごと'])}<br><small>覚え方：${esc(x['暗記法']||'—')}</small></div>`).join('')}</div><div class="result-actions single"><button id="nextSort" class="primary">次の問題</button></div></div>`;
-  $('#nextSort').onclick=()=>{speechSynthesis?.cancel();state.questionNo++;newSort();};
-}
-
-function showResult(area, ok, item, nextQuestion) {
-  area.innerHTML=`<div class="result ${ok?'correct':'wrong'}"><div class="result-title">${ok?'◎ 正解！':'△ おしい！'}</div><p><b>${esc(yearLabel(item['年代']))}</b>　${esc(item['できごと'])}</p><p class="mnemonic"><b>覚え方</b><br>${esc(item['暗記法']||'—')}</p><label class="learn-check"><input id="learnToggle" type="checkbox" ${state.learned.has(itemId(item))?'checked':''}>この問題は覚えた！</label><div class="result-actions"><button id="speakOne" class="secondary">🔊 暗記法を聞く</button><button id="nextQuestion" class="primary">次の問題</button></div></div>`;
-  $('#learnToggle').onchange=e=>toggleLearned(itemId(item),e.target.checked); $('#speakOne').onclick=()=>speak(mnemonicSpeech(item)); $('#nextQuestion').onclick=e=>{e.preventDefault();e.currentTarget.disabled=true;speechSynthesis?.cancel();state.questionNo++;nextQuestion();}; if(state.speech) setTimeout(()=>$('#speakOne').click(),250);
-}
-
-function renderList(mode='all') {
-  setNav(mode==='learned'?'learned':'list'); state.screen=mode==='learned'?'learned':'list';
-  screen.innerHTML=questionHead(mode==='learned'?'覚えた問題':'年代リスト', mode==='learned'?'チェックした問題を確認':'全項目をサーッと確認')+`
-    <div class="tools"><input id="searchInput" class="search" type="search" placeholder="年代・できごとを検索"><select id="listFilter" class="filter-select" aria-label="表示する問題"><option value="${mode==='learned'?'learned':'all'}">${mode==='learned'?'覚えた':'すべて'}</option><option value="unlearned">まだ覚えていない</option>${mode!=='learned'?'<option value="learned">覚えた</option>':'<option value="all">すべて</option>'}</select></div><div id="listArea"></div>`;
-  bindGo(); const update=()=>drawList($('#searchInput').value,$('#listFilter').value); $('#searchInput').oninput=update; $('#listFilter').onchange=update; update();
-}
-function drawList(query, filter) {
-  const q=query.trim().toLowerCase(); let items=state.data.filter(x=>!q||Object.values(x).some(v=>String(v).toLowerCase().includes(q)));
-  if(filter==='learned')items=items.filter(x=>state.learned.has(itemId(x))); if(filter==='unlearned')items=items.filter(x=>!state.learned.has(itemId(x)));
-  const area=$('#listArea'); if(!items.length){area.innerHTML='<div class="empty"><span class="face">ฅ^•ﻌ•^ฅ</span>該当する問題はありません</div>';return;}
-  area.innerHTML=`<div class="list-stats">${items.length}件を表示</div><div class="timeline">${items.map(x=>`<article class="timeline-item"><div class="timeline-year">${esc(yearLabel(x['年代']))}</div><div class="timeline-event">${esc(x['できごと'])}</div><button class="mini-check ${state.learned.has(itemId(x))?'done':''}" data-learn="${esc(itemId(x))}" aria-label="覚えたを切り替える">✓</button><div class="timeline-meta">${x['番号']?`<span class="badge">No.${esc(x['番号'])}</span>`:''}${x['時代']?`<span class="badge">${esc(x['時代'])}</span>`:''}${badges(x)}<span class="badge">覚え方：${esc(x['暗記法']||'—')}</span></div></article>`).join('')}</div>`;
-  $$('[data-learn]',area).forEach(b=>b.onclick=()=>{toggleLearned(b.dataset.learn);drawList(query,filter);});
-}
-
-function playSound(correct) {
-  if(!state.effects)return; const C=window.AudioContext||window.webkitAudioContext; if(!C)return; const ctx=new C(); const now=ctx.currentTime;
-  const tone=(freq,start,duration,type='sine')=>{const o=ctx.createOscillator(),g=ctx.createGain();o.type=type;o.frequency.setValueAtTime(freq,now+start);g.gain.setValueAtTime(.0001,now+start);g.gain.exponentialRampToValueAtTime(.16,now+start+.015);g.gain.exponentialRampToValueAtTime(.0001,now+start+duration);o.connect(g).connect(ctx.destination);o.start(now+start);o.stop(now+start+duration+.02);};
-  if(correct){tone(660,0,.18);tone(880,.15,.28);}else{tone(260,0,.18,'triangle');tone(196,.16,.3,'triangle');} setTimeout(()=>ctx.close(),700);
-}
-function speak(text) { if(!('speechSynthesis'in window))return; speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(text);u.lang='ja-JP';u.rate=.9;u.pitch=1.08;speechSynthesis.speak(u); }
-function bindGo(){ $$('[data-go]',screen).forEach(b=>b.onclick=()=>go(b.dataset.go)); }
-
-document.addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b&&!screen.contains(b))go(b.dataset.go);});
-$('#soundButton').onclick=()=>$('#settingsDialog').showModal();
-$('#effectToggle').checked=state.effects;$('#speechToggle').checked=state.speech;
-$('#effectToggle').onchange=e=>{state.effects=e.target.checked;localStorage.setItem('historyCatEffects',state.effects);};
-$('#speechToggle').onchange=e=>{state.speech=e.target.checked;localStorage.setItem('historyCatSpeech',state.speech);if(!state.speech)speechSynthesis?.cancel();};
-
-fetch('history.csv?v=4').then(r=>{if(!r.ok)throw new Error();return r.text();}).then(text=>{state.data=parseCSV(text);if(!state.data.length)throw new Error();$('#loading').hidden=true;$('#app').hidden=false;renderHome();}).catch(()=>{$('#loading').innerHTML='データを読み込めませんでした。<br>GitHub Pagesから開き直してください。';});
+'use strict';
+const $=s=>document.querySelector(s),app=$('#app'),KEY='toki-history-learned-v1';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function parseCSV(text){let rows=[],row=[],cell='',q=false;for(let i=0;i<text.length;i++){let c=text[i];if(c==='"'){if(q&&text[i+1]==='"'){cell+='"';i++;}else q=!q;}else if(c===','&&!q){row.push(cell);cell='';}else if((c==='\n'||c==='\r')&&!q){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell);if(row.some(x=>x.trim()))rows.push(row);row=[];cell='';}else cell+=c;}row.push(cell);if(row.some(x=>x.trim()))rows.push(row);return rows;}
+function yearInfo(y){const n=Number((y.match(/\d+/)||[])[0]);return{n,bc:/B\.?C|紀元前/i.test(y),century:y.includes('世紀')};}
+function time(y){const t=yearInfo(y);return t.bc?-t.n:t.century?(t.n-1)*100+1:t.n;}
+function compare(a,b){return time(a.year)-time(b.year)||Number(a.no)-Number(b.no)||a.row-b.row;}
+function shuffle(a){a=[...a];for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+let data=[],learned=new Set(),sound=true,mode='',selected=new Set(),exclude=true,pool=[],queue=[],qIndex=0,correct=0,current=null,answered=false,choice=null,order=[],orderItems=[],digits='',speaking=null,audioCtx=null;
+try{learned=new Set(JSON.parse(localStorage.getItem(KEY)||'[]'));sound=localStorage.getItem('toki-sound')!=='off';}catch{}
+function toast(t){$('#notice').textContent=t;$('#notice').style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#notice').style.display='none',4000);}
+function setLearned(id,v){v?learned.add(id):learned.delete(id);try{localStorage.setItem(KEY,JSON.stringify([...learned]));}catch{toast('記録を保存できません。ブラウザの保存設定をご確認ください。');}}
+function stopSpeech(){speaking=null;if('speechSynthesis'in window)speechSynthesis.cancel();document.querySelectorAll('[data-speak]').forEach(b=>b.textContent='▶ 暗記法を読み上げ');}
+function speak(id,button){if(speaking===id){stopSpeech();return;}stopSpeech();if(!('speechSynthesis'in window)){toast('このブラウザは読み上げに対応していません。');return;}const d=data.find(x=>x.id===id);if(!d?.speech){toast('H欄に読み上げ文がありません。');return;}const u=new SpeechSynthesisUtterance(d.speech);u.lang='ja-JP';u.rate=.88;speaking=id;button.textContent='■ 読み上げを止める';u.onend=()=>{if(speaking===id)stopSpeech();};u.onerror=()=>{if(speaking===id)stopSpeech();};speechSynthesis.speak(u);}
+function beep(ok){if(!sound)return;try{audioCtx ||= new(window.AudioContext||window.webkitAudioContext)();audioCtx.resume();[...(ok?[660,880]:[240,180])].forEach((freq,i)=>{const o=audioCtx.createOscillator(),g=audioCtx.createGain(),t=audioCtx.currentTime+i*.14;o.type='sine';o.frequency.value=freq;g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.12,t+.015);g.gain.exponentialRampToValueAtTime(.0001,t+.18);o.connect(g);g.connect(audioCtx.destination);o.start(t);o.stop(t+.2);});}catch{}}
+function page(html){stopSpeech();app.innerHTML=html;window.scrollTo(0,0);}
+function soundLabel(){$('#sound').textContent=sound?'♪ 音 ON':'♪ 音 OFF';}
+$('#sound').onclick=()=>{sound=!sound;soundLabel();try{localStorage.setItem('toki-sound',sound?'on':'off');}catch{}};
+$('#home').onclick=()=>home();
+const modeNames={input:'できごと → 年代',choice:'年代 → できごと',order:'近いできごとを並べ替え'};
+function home(){page(`<section class="hero"><div class="eyebrow">A LITTLE HISTORY, EVERY DAY</div><h1>歴史の流れを、<br>ひとつずつ。</h1><p class="muted">年代とできごとを、あなたのペースで。</p></section><div class="stat"><span>覚えたできごと</span><b>${data.filter(d=>learned.has(d.id)).length} / ${data.length}</b></div><div class="modes">${Object.entries(modeNames).map(([k,v],i)=>`<button class="mode" data-mode="${k}"><span class="num">0${i+1}</span><span><b>${v}</b><small>${['大きな数字ボタンで入力','4つの選択肢から選ぶ','古い順にタップして並べる'][i]}</small></span></button>`).join('')}</div><div class="row" style="margin-top:22px"><button id="all-list">すべての問題</button><button id="learned-list">覚えた問題</button></div><details class="footer"><summary>使い方・データについて</summary><p>モードを選び、時代にチェックしてスタート。答え合わせの後は「次の問題」で進みます。覚えたチェックはいつでも外せます。記録はこのブラウザに保存されます。</p><p>時代・文章はCSV原文を使用。C欄が空白の${data.filter(d=>d.era==='時代未設定').length}件は「時代未設定」です。世紀表記の並べ替えは、その世紀の開始年を基準にします。同じ年代はCSV番号順、番号も同じならCSV行順です。</p></details>`);document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;settings();});$('#all-list').onclick=()=>list(false);$('#learned-list').onclick=()=>list(true);}
+function settings(){const eras=[...new Set(data.map(d=>d.era))];if(!selected.size)selected=new Set(eras);page(`<div class="eyebrow">出題範囲</div><h1>${modeNames[mode]}</h1><p class="muted">出題する時代を、いくつでも選べます。</p><div class="row"><button id="select-all">すべて選ぶ</button><button id="select-none">すべて外す</button></div><div class="chips">${eras.map((e,i)=>`<label class="check"><input type="checkbox" data-era="${i}" ${selected.has(e)?'checked':''}><span>${esc(e)} <small>(${data.filter(d=>d.era===e).length})</small></span></label>`).join('')}</div><label class="check"><input id="exclude" type="checkbox" ${exclude?'checked':''}>覚えた問題を除く</label><p class="tip">C欄が空白の問題は「時代未設定」で選べます。${mode==='choice'?'正解・選択肢とも、選んだ範囲から出題します。異なる年代の選択肢が足りない問題は出題対象から外れます。':''}${mode==='order'?'近い年代の4件（少ない場合は2〜3件）を出題します。':''}</p><p id="count"></p><button id="start" class="primary wide">はじめる</button>`);
+const update=()=>{pool=data.filter(d=>selected.has(d.era)&&(!exclude||!learned.has(d.id)));const eligible=eligiblePool();$('#count').textContent=`出題できる問題：${eligible.length}件${mode==='order'?' ／ 1回10問':''}`;$('#start').disabled=eligible.length<(mode==='order'?2:1);};document.querySelectorAll('[data-era]').forEach(b=>b.onchange=()=>{b.checked?selected.add(eras[b.dataset.era]):selected.delete(eras[b.dataset.era]);update();});$('#select-all').onclick=()=>{selected=new Set(eras);document.querySelectorAll('[data-era]').forEach(b=>b.checked=true);update();};$('#select-none').onclick=()=>{selected.clear();document.querySelectorAll('[data-era]').forEach(b=>b.checked=false);update();};$('#exclude').onchange=e=>{exclude=e.target.checked;update();};$('#start').onclick=()=>{queue=shuffle(eligiblePool());qIndex=0;correct=0;nextQuestion();};update();}
+function distractors(d){return pool.filter(x=>x.year!==d.year&&x.event!==d.event).filter((x,i,a)=>a.findIndex(y=>y.event===x.event)===i);}
+function eligiblePool(){return mode==='choice'?pool.filter(d=>distractors(d).length>=3):pool;}
+function nextQuestion(){stopSpeech();if(qIndex>=(mode==='order'?10:queue.length)){finish();return;}answered=false;choice=null;order=[];digits='';current=queue[qIndex%queue.length];if(mode==='order'){const sorted=[...pool].sort(compare),anchor=sorted.indexOf(current),n=Math.min(4,sorted.length),start=Math.max(0,Math.min(sorted.length-n,anchor-Math.floor(Math.random()*n)));orderItems=shuffle(sorted.slice(start,start+n));if(orderItems.every((x,i)=>x===sorted[start+i]))orderItems.reverse();}renderQuestion();}
+function renderQuestion(){const total=mode==='order'?10:queue.length;page(`<div class="row"><button id="back" class="quiet">← 範囲を変える</button><span class="muted" style="text-align:right">${qIndex+1} / ${total}問</span></div><div class="progress"><i style="width:${qIndex/total*100}%"></i></div><div class="eyebrow">${modeNames[mode]}</div><section class="card"><span class="tag">${mode==='order'?'古い → 新しい':esc(current.era)}</span><h2>${mode==='input'?esc(current.event):mode==='choice'?esc(displayYear(current.year))+'のできごとは？':'古い順にタップしよう'}</h2><div id="question-body"></div><button id="check" class="primary wide" disabled>答え合わせ</button><div id="feedback" aria-live="polite"></div></section>`);$('#back').onclick=settings;$('#check').onclick=check;
+if(mode==='input'){const t=yearInfo(current.year);$('#question-body').innerHTML=`<div class="unit">${t.bc?'紀元前の年を入力':t.century?'何世紀？ 数字を入力':'西暦を入力'}</div><input id="year" aria-label="年代の数字" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="？" maxlength="4"><div class="keys">${['1','2','3','4','5','6','7','8','9','消す','0','⌫'].map(k=>`<button data-key="${k}" type="button">${k}</button>`).join('')}</div>`;$('#year').oninput=e=>{digits=e.target.value.normalize('NFKC').replace(/\D/g,'').slice(0,4);e.target.value=digits;$('#check').disabled=!digits;};$('#year').onkeydown=e=>{if(e.key==='Enter'&&digits){e.preventDefault();check();}};document.querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>{if(answered)return;digits=b.dataset.key==='消す'?'':b.dataset.key==='⌫'?digits.slice(0,-1):(digits+b.dataset.key).slice(0,4);$('#year').value=digits;$('#check').disabled=!digits;});}
+if(mode==='choice'){const options=shuffle([current,...shuffle(distractors(current)).slice(0,3)]);$('#question-body').innerHTML=`<div class="choices">${options.map((d,i)=>`<button data-option="${esc(d.id)}">${i+1}. ${esc(d.event)}</button>`).join('')}</div>`;document.querySelectorAll('[data-option]').forEach(b=>b.onclick=()=>{if(answered)return;choice=b.dataset.option;document.querySelectorAll('[data-option]').forEach(x=>x.classList.toggle('selected',x===b));$('#check').disabled=false;});}
+if(mode==='order')renderOrder();}
+function renderOrder(){$('#question-body').innerHTML=`<p class="muted" style="font-size:13px">同じ年代は番号の小さい順。選んだものは「戻す」で選び直せます。</p><div>${Array.from({length:orderItems.length},(_,i)=>{const d=orderItems.find(x=>x.id===order[i]);return `<div class="order-slot">${i+1}. ${d?`<button data-undo="${i}">戻す</button><small>No.${esc(d.no)}</small> ${esc(d.event)}`:'未選択'}</div>`;}).join('')}</div><div class="choices">${orderItems.filter(d=>!order.includes(d.id)).map(d=>`<button data-order="${esc(d.id)}"><small>No.${esc(d.no)}</small> ${esc(d.event)}</button>`).join('')}</div>`;document.querySelectorAll('[data-order]').forEach(b=>b.onclick=()=>{if(answered)return;order.push(b.dataset.order);renderOrder();});document.querySelectorAll('[data-undo]').forEach(b=>b.onclick=()=>{if(answered)return;order.splice(Number(b.dataset.undo),1);renderOrder();});$('#check').disabled=order.length!==orderItems.length;}
+function displayYear(y){return /^\d+$/.test(y)?y+'年':y.replace('B.C.','紀元前')+(/^B.C./.test(y)?'年':'');}
+function answerCard(d,rank=''){return `<div class="answer-item"><b>${rank}${esc(displayYear(d.year))} <small>No.${esc(d.no)}</small></b><p>${esc(d.event)}</p><div class="memory">${esc(d.memory||'暗記法は未登録です。')}</div>${mode!=='order'?`<button data-speak="${esc(d.id)}" class="wide quiet">▶ 暗記法を読み上げ</button>`:''}<label class="check" style="margin-top:12px"><input type="checkbox" data-learn="${esc(d.id)}" ${learned.has(d.id)?'checked':''}>この問題を覚えた</label></div>`;}
+function check(){if(answered)return;let ok;if(mode==='input'){if(!digits)return;ok=Number(digits)===yearInfo(current.year).n;}else if(mode==='choice'){if(choice===null)return;ok=choice===current.id;}else{if(order.length!==orderItems.length)return;ok=[...orderItems].sort(compare).every((x,i)=>x.id===order[i]);}answered=true;correct+=ok?1:0;beep(ok);$('#check').hidden=true;document.querySelectorAll('#question-body button,#question-body input').forEach(b=>b.disabled=true);if(mode==='choice')document.querySelectorAll('[data-option]').forEach(b=>{if(b.dataset.option===current.id)b.classList.add('good');else if(b.dataset.option===choice)b.classList.add('bad');});const answers=mode==='order'?[...orderItems].sort(compare):[current];$('#feedback').innerHTML=`<div class="result ${ok?'':'wrong'}"><h2>${ok?'○ 正解！':'× おしい！'}</h2><span>${ok?'この調子で覚えていこう。':'正しい答えを確認しよう。'}</span>${mode==='input'&&!ok?`<p>あなたの回答：${esc(digits)}${yearInfo(current.year).century?'世紀':'年'}</p>`:''}${mode==='order'?'<p>正しい順番 ↓</p>':''}${answers.map((d,i)=>answerCard(d,mode==='order'?`${i+1}. `:'')).join('')}</div><button id="next" class="primary wide">次の問題 →</button>`;bindAnswer();$('#next').onclick=()=>{qIndex++;nextQuestion();};$('#feedback').scrollIntoView({behavior:'auto',block:'nearest'});}
+function bindAnswer(){document.querySelectorAll('[data-learn]').forEach(b=>b.onchange=()=>setLearned(b.dataset.learn,b.checked));document.querySelectorAll('[data-speak]').forEach(b=>b.onclick=()=>speak(b.dataset.speak,b));}
+function finish(){page(`<section class="card"><div class="eyebrow">おつかれさまでした</div><h1>今日の一歩、完了。</h1><p>正解 <b>${correct}</b> / ${qIndex}問</p><button id="again" class="primary wide">範囲を選んでもう一度</button><button id="go-home" class="wide">ホームへ</button></section>`);$('#again').onclick=settings;$('#go-home').onclick=home;}
+function list(onlyLearned){page(`<div class="eyebrow">歴史の一覧</div><h1>できごと手帳</h1><input id="search" type="search" placeholder="年号・できごと・暗記法で検索" aria-label="問題を検索"><div class="row" style="margin-top:12px"><select id="list-era" aria-label="時代で絞り込む"><option value="">すべての時代</option>${[...new Set(data.map(d=>d.era))].map(e=>`<option>${esc(e)}</option>`).join('')}</select><select id="list-status" aria-label="記憶状態で絞り込む"><option value="all">すべて</option><option value="yes" ${onlyLearned?'selected':''}>覚えた問題</option><option value="no">まだ覚えていない</option></select></div><p id="list-count" class="muted"></p><p class="muted" style="font-size:12px">表は横にスクロールできます。チェックは外すこともできます。</p><div id="list-results"></div>`);function update(){stopSpeech();const query=$('#search').value.normalize('NFKC').toLowerCase().trim(),era=$('#list-era').value,status=$('#list-status').value,rows=data.filter(d=>(!era||d.era===era)&&(status==='all'||learned.has(d.id)===(status==='yes'))&&[d.no,d.year,d.era,d.event,d.memory].join(' ').normalize('NFKC').toLowerCase().includes(query));$('#list-count').textContent=`${rows.length}件 / 全${data.length}件`;$('#list-results').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>覚えた</th><th>番号</th><th>年代 / 時代</th><th>できごと</th><th>暗記法</th></tr></thead><tbody>${rows.map(d=>`<tr><td><input type="checkbox" aria-label="${esc(d.event)}を覚えた" data-list-learn="${esc(d.id)}" ${learned.has(d.id)?'checked':''}></td><td>${esc(d.no)}</td><td>${esc(displayYear(d.year))}<br><small>${esc(d.era)}</small></td><td>${esc(d.event)}</td><td>${esc(d.memory)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="card">該当する問題はありません。</p>';document.querySelectorAll('[data-list-learn]').forEach(b=>b.onchange=()=>{setLearned(b.dataset.listLearn,b.checked);update();});}$('#search').oninput=update;$('#list-era').onchange=update;$('#list-status').onchange=update;update();}
+async function init(){let text=window.HISTORY_CSV;try{if(location.protocol!=='file:'){const r=await fetch('history.csv',{cache:'no-store'});if(!r.ok)throw Error();text=await r.text();}}catch{toast('同梱の問題データを読み込みました。');}data=parseCSV(text).slice(1).filter(r=>r[1]?.trim()&&r[5]?.trim()).map((r,i)=>({id:JSON.stringify([r[0],r[1],r[5]]),row:i,no:r[0],year:r[1].trim(),era:r[2].trim()||'時代未設定',event:r[5],memory:r[6]||'',speech:r[7]||''}));if(!data.length){page('<p>問題データがありません。history.csvを確認してください。</p>');return;}soundLabel();home();}
+window.addEventListener('pagehide',stopSpeech);init();
