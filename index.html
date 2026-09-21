@@ -28,6 +28,34 @@ input[type=search],select,#year{width:100%;padding:13px;border:1.5px solid #bfd0
 #notice{position:fixed;bottom:16px;left:5%;width:90%;text-align:center;background:#174795;color:#fff;border-radius:12px;padding:12px;display:none;z-index:9}
 @media(max-width:380px){main{padding:8px 12px 50px}h1{font-size:29px}.card{padding:16px}.mode{padding:17px 12px;gap:11px}.mode b{font-size:16px}.session{font-size:12px}}
 @media(prefers-reduced-motion:no-preference){.result:not(.wrong){animation:pop .25s ease-out}.spark{animation:spark .45s ease-out}@keyframes pop{from{transform:translateY(7px);opacity:.5}to{transform:none;opacity:1}}@keyframes spark{from{transform:scale(.75);opacity:0}to{transform:scale(1);opacity:1}}}
+
+/* v4: progress, weak questions, daily record, calendar */
+.dashboard{display:grid;gap:14px;margin:18px 0}
+.mastery-card{background:linear-gradient(135deg,#154fa8,#176fe8);color:#fff;border:0}
+.mastery-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-end}
+.mastery-big{font-size:38px;font-weight:950;letter-spacing:-.04em}
+.progress{height:12px;background:#ffffff38;border-radius:999px;overflow:hidden;margin-top:12px}
+.progress>i{display:block;height:100%;background:#fff;border-radius:999px}
+.today-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.today-grid div{background:#f5f8fd;border:1px solid #e0e8f3;border-radius:13px;padding:12px}
+.today-grid b{display:block;font-size:22px;color:#174795;margin-top:2px}
+.era-progress{display:grid;gap:12px}
+.era-line{display:grid;grid-template-columns:minmax(70px,1fr) minmax(110px,2fr) 50px;gap:9px;align-items:center;font-size:13px}
+.era-line .bar{height:9px;background:#e5edf7;border-radius:999px;overflow:hidden}
+.era-line .bar i{display:block;height:100%;background:#3375e6;border-radius:999px}
+.weak-btn{border-left:5px solid #e75845}
+.weak-btn .num{background:#ffebe8;color:#bd3d2d}
+.calendar-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}
+.calendar-head button{min-height:42px;padding:8px 12px}
+.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
+.cal-dow{text-align:center;font-size:11px;color:#71839c;padding:5px 0;font-weight:800}
+.cal-day{min-height:58px;padding:6px 3px;border-radius:10px;box-shadow:none;text-align:center;font-size:12px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px}
+.cal-day.empty{visibility:hidden}.cal-day.has{background:#eaf2ff;border-color:#8eb6f5;color:#174795}
+.cal-day.today{outline:2px solid #1767e8;outline-offset:1px}
+.cal-day b{font-size:11px}.day-detail{margin-top:14px;background:#f5f8fd;border-radius:14px;padding:14px;line-height:1.8}
+.retry-note{background:#fff5db;border:1px solid #f1d481;color:#6c5312;border-radius:12px;padding:10px 12px;margin-top:12px;font-size:13px;font-weight:700}
+@media(max-width:380px){.era-line{grid-template-columns:72px 1fr 42px}.cal-day{min-height:52px;padding:4px 2px}.today-grid{gap:7px}}
+
 </style>
 </head>
 <body>
@@ -39,7 +67,14 @@ const $=s=>document.querySelector(s), app=$("#app"), KEY="toki-history-learned-v
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function parseCSV(t){let a=[],r=[],c="",q=false;for(let i=0;i<t.length;i++){let x=t[i];if(x=='"'){if(q&&t[i+1]=='"'){c+='"';i++}else q=!q}else if(x==","&&!q){r.push(c);c=""}else if((x=="\n"||x=="\r")&&!q){if(x=="\r"&&t[i+1]=="\n")i++;r.push(c);if(r.some(v=>v.trim()))a.push(r);r=[];c=""}else c+=x}r.push(c);if(r.some(v=>v.trim()))a.push(r);return a}
 let data=[],learned=new Set(),sound=true,mode="",selected=new Set(),pool=[],queue=[],current=null,orderItems=[],order=[],digits="",choice=null,answered=false,qIndex=0,correct=0,streak=0,speaking=null,audioCtx=null;
-try{learned=new Set(JSON.parse(localStorage.getItem(KEY)||"[]"));sound=localStorage.getItem("toki-sound")!=="off"}catch{}
+let weak={},daily={},retryDue=[],sessionMaxStreak=0,calendarCursor=new Date(),weakOnly=false;
+const WEAK_KEY="toki-history-weak-v1", DAILY_KEY="toki-history-daily-v1";
+try{
+learned=new Set(JSON.parse(localStorage.getItem(KEY)||"[]"));
+sound=localStorage.getItem("toki-sound")!=="off";
+weak=JSON.parse(localStorage.getItem(WEAK_KEY)||"{}");
+daily=JSON.parse(localStorage.getItem(DAILY_KEY)||"{}");
+}catch{}
 const modeNames={input:"できごと → 年代",choice:"年代 → できごと",order:"近いできごとを並べ替え"};
 function yearInfo(y){let n=Number((y.match(/\d+/)||[])[0]);return{n,bc:/B\.?C|紀元前/i.test(y),century:y.includes("世紀")}}
 function time(y){let t=yearInfo(y);return t.bc?-t.n:t.century?(t.n-1)*100+1:t.n}
@@ -48,21 +83,102 @@ function displayYear(y){return /^\d+$/.test(y)?y+"年":y.replace("B.C.","紀元�
 function shuffle(a){a=[...a];for(let i=a.length-1;i;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 function page(h){stopSpeech();app.innerHTML=h;scrollTo(0,0)}
 function toast(t){$("#notice").textContent=t;$("#notice").style.display="block";clearTimeout(toast.t);toast.t=setTimeout(()=>$("#notice").style.display="none",3000)}
-function setLearned(id,v){v?learned.add(id):learned.delete(id);try{localStorage.setItem(KEY,JSON.stringify([...learned]))}catch{}}
+function setLearned(id,v){
+ let was=learned.has(id);
+ v?learned.add(id):learned.delete(id);
+ try{localStorage.setItem(KEY,JSON.stringify([...learned]))}catch{}
+ if(v&&!was){let r=todayRecord();r.newLearned++;clearWeak(id)}
+ snapshotMastery()
+}
+function localDateKey(d=new Date()){let y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),day=String(d.getDate()).padStart(2,"0");return `${y}-${m}-${day}`}
+function masteryPct(){return data.length?Math.round(data.filter(d=>learned.has(d.id)).length/data.length*100):0}
+function saveWeak(){try{localStorage.setItem(WEAK_KEY,JSON.stringify(weak))}catch{}}
+function saveDaily(){try{localStorage.setItem(DAILY_KEY,JSON.stringify(daily))}catch{}}
+function todayRecord(){
+ let k=localDateKey(),r=daily[k];
+ if(!r)r=daily[k]={questions:0,correct:0,maxStreak:0,newLearned:0,startMastery:masteryPct(),endMastery:masteryPct()};
+ return r
+}
+function snapshotMastery(){
+ let r=todayRecord();r.endMastery=masteryPct();saveDaily()
+}
+function markWeak(id){weak[id]=(weak[id]||0)+1;saveWeak()}
+function clearWeak(id){delete weak[id];saveWeak()}
+function scheduleRetry(id){
+ retryDue=retryDue.filter(x=>x.id!==id);
+ retryDue.push({id,due:qIndex+3+Math.floor(Math.random()*3)})
+}
+function recordAnswer(ok){
+ let r=todayRecord();r.questions++;if(ok)r.correct++;
+ sessionMaxStreak=Math.max(sessionMaxStreak,streak);r.maxStreak=Math.max(r.maxStreak,sessionMaxStreak);
+ r.endMastery=masteryPct();saveDaily()
+}
+function eraStats(){
+ return [...new Set(data.map(d=>d.era))].map(era=>{let rows=data.filter(d=>d.era===era),n=rows.filter(d=>learned.has(d.id)).length;return{era,n,total:rows.length,pct:rows.length?Math.round(n/rows.length*100):0}})
+}
 function stopSpeech(){speaking=null;if("speechSynthesis"in window)speechSynthesis.cancel();document.querySelectorAll("[data-speak]").forEach(b=>b.textContent="▶ 暗記法を読み上げ")}
 function speak(id,b){if(speaking===id){stopSpeech();return}stopSpeech();let d=data.find(x=>x.id===id);if(!d?.speech){toast("H欄に読み上げ文がありません");return}let u=new SpeechSynthesisUtterance(d.speech);u.lang="ja-JP";u.rate=.9;speaking=id;b.textContent="■ 読み上げを止める";u.onend=()=>stopSpeech();speechSynthesis.speak(u)}
 function beep(ok){if(!sound)return;try{audioCtx||=new(AudioContext||webkitAudioContext)();[...(ok?[660,880]:[240,180])].forEach((f,i)=>{let o=audioCtx.createOscillator(),g=audioCtx.createGain(),t=audioCtx.currentTime+i*.13;o.frequency.value=f;g.gain.setValueAtTime(.001,t);g.gain.exponentialRampToValueAtTime(.1,t+.02);g.gain.exponentialRampToValueAtTime(.001,t+.16);o.connect(g);g.connect(audioCtx.destination);o.start(t);o.stop(t+.18)})}catch{}}
 function soundLabel(){$("#sound").textContent=sound?"♪ 音 ON":"♪ 音 OFF"}
 $("#sound").onclick=()=>{sound=!sound;localStorage.setItem("toki-sound",sound?"on":"off");soundLabel()};$("#home").onclick=home;
-function home(){page(`<section class="hero"><div class="eyebrow">HISTORY / LEVEL UP</div><h1>ひらめく。覚える。<br><em>歴史がつながる！</em></h1><p class="muted">正解を重ねて、歴史の知識をチャージしよう。</p></section><div class="stat"><span>覚えたできごと</span><b>${data.filter(d=>learned.has(d.id)).length} / ${data.length}</b></div><div class="modes">${Object.entries(modeNames).map(([k,v],i)=>`<button class="mode" data-mode="${k}"><span class="num">0${i+1}</span><span><b>${v}</b><small>${["iPhoneの数字キーボードで入力","4つの選択肢から選ぶ","古い順にタップして①②③④"][i]}</small></span></button>`).join("")}<button class="mode" id="memory-list"><span class="num">04</span><span><b>暗記法一覧</b><small>時代ごとに語呂合わせを見直す</small></span></button></div><div class="row" style="margin-top:22px"><button id="all-list">すべての問題</button><button id="learned-list">覚えた問題</button></div>`);document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{mode=b.dataset.mode;settings()});$("#memory-list").onclick=memoryList;$("#all-list").onclick=()=>list(false);$("#learned-list").onclick=()=>list(true)}
-function eligible(){return mode==="choice"?pool.filter(d=>pool.filter(x=>x.year!==d.year&&x.event!==d.event).length>=3):pool}
-function settings(){let eras=[...new Set(data.map(d=>d.era))];if(!selected.size)selected=new Set(eras);page(`<button id="mode-back" class="quiet back">← モード選択に戻る</button><div class="eyebrow">出題範囲</div><h1>${modeNames[mode]}</h1><p class="muted">出題する時代を複数選べます。覚えた問題は自動で除外します。</p><div class="row"><button id="all">すべて選ぶ</button><button id="none">すべて外す</button></div><div class="chips">${eras.map((e,i)=>`<label class="check"><input type="checkbox" data-era="${i}" ${selected.has(e)?"checked":""}>${esc(e)} <small>(${data.filter(d=>d.era===e).length})</small></label>`).join("")}</div><p id="count"></p><button id="start" class="primary wide">スタート！</button>`);$("#mode-back").onclick=home;const upd=()=>{pool=data.filter(d=>selected.has(d.era)&&!learned.has(d.id));$("#count").textContent=`現在 ${eligible().length}問が出題可能`;$("#start").disabled=eligible().length<(mode==="order"?2:1)};document.querySelectorAll("[data-era]").forEach(b=>b.onchange=()=>{b.checked?selected.add(eras[b.dataset.era]):selected.delete(eras[b.dataset.era]);upd()});$("#all").onclick=()=>{selected=new Set(eras);document.querySelectorAll("[data-era]").forEach(x=>x.checked=true);upd()};$("#none").onclick=()=>{selected.clear();document.querySelectorAll("[data-era]").forEach(x=>x.checked=false);upd()};$("#start").onclick=()=>{qIndex=correct=streak=0;queue=[];current=null;nextQuestion()};upd()}
-function nextQuestion(){pool=data.filter(d=>selected.has(d.era)&&!learned.has(d.id));let e=eligible();if(e.length<(mode==="order"?2:1)){page(`<section class="card"><h2>${pool.length?"出題できる問題が足りません":"この範囲は全部覚えました！ 🎉"}</h2><button id="back" class="primary wide">← 範囲を変える</button></section>`);$("#back").onclick=settings;return}let prev=current?.id;queue=queue.filter(d=>e.some(x=>x.id===d.id));if(!queue.length)queue=shuffle(e);if(queue.length>1&&queue[0].id===prev)[queue[0],queue[1]]=[queue[1],queue[0]];current=queue.shift();answered=false;choice=null;digits="";order=[];if(mode==="order"){let sorted=[...pool].sort(compare),anchor=sorted.indexOf(current),n=Math.min(4,sorted.length),start=Math.max(0,Math.min(sorted.length-n,anchor-Math.floor(Math.random()*n)));orderItems=shuffle(sorted.slice(start,start+n));if(orderItems.every((x,i)=>x===sorted[start+i]))orderItems.reverse()}renderQuestion()}
+function home(){
+ snapshotMastery();
+ let pct=masteryPct(),t=todayRecord(),rate=t.questions?Math.round(t.correct/t.questions*100):0,weakCount=data.filter(d=>weak[d.id]&&!learned.has(d.id)).length;
+ page(`<section class="hero"><div class="eyebrow">HISTORY / LEVEL UP</div><h1>ひらめく。覚える。<br><em>歴史がつながる！</em></h1><p class="muted">昨日の自分を、1％ずつ追い越そう。</p></section>
+ <section class="card mastery-card"><div class="mastery-top"><div><small style="color:#dceaff">全体習熟度</small><div class="mastery-big">${pct}%</div></div><b>${data.filter(d=>learned.has(d.id)).length} / ${data.length}</b></div><div class="progress"><i style="width:${pct}%"></i></div></section>
+ <section class="card"><div class="eyebrow">TODAY</div><h2 style="margin:6px 0">今日の記録</h2><div class="today-grid"><div>解いた問題<b>${t.questions}問</b></div><div>正解率<b>${rate}%</b></div><div>最高連続<b>${t.maxStreak}問</b></div><div>習熟度UP<b>${Math.max(0,t.endMastery-t.startMastery)}%</b></div></div></section>
+ <div class="modes">${Object.entries(modeNames).map(([k,v],i)=>`<button class="mode" data-mode="${k}"><span class="num">0${i+1}</span><span><b>${v}</b><small>${["iPhoneの数字キーボードで入力","4つの選択肢から選ぶ","古い順にタップして①②③④"][i]}</small></span></button>`).join("")}<button class="mode" id="memory-list"><span class="num">04</span><span><b>暗記法一覧</b><small>時代ごとに語呂合わせを見直す</small></span></button>
+ <button class="mode weak-btn" id="weak-mode"><span class="num">🔥</span><span><b>苦手を特訓</b><small>間違えた問題 ${weakCount}問を集中練習</small></span></button></div>
+ <section class="card"><div class="eyebrow">MASTERY</div><h2 style="margin:6px 0 14px">時代別の習熟度</h2><div class="era-progress">${eraStats().map(x=>`<div class="era-line"><span>${esc(x.era)}</span><span class="bar"><i style="width:${x.pct}%"></i></span><b>${x.pct}%</b></div>`).join("")}</div></section>
+ <button id="calendar" class="primary wide">📅 習熟度カレンダー</button>
+ <div class="row" style="margin-top:12px"><button id="all-list">すべての問題</button><button id="learned-list">覚えた問題</button></div>`);
+ document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{mode=b.dataset.mode;settings()});
+ $("#memory-list").onclick=memoryList;$("#all-list").onclick=()=>list(false);$("#learned-list").onclick=()=>list(true);
+ $("#calendar").onclick=calendarView;$("#weak-mode").onclick=weakTraining
+}function weakTraining(){
+ weakOnly=true;
+ let rows=data.filter(d=>weak[d.id]&&!learned.has(d.id));
+ if(!rows.length){toast("今のところ苦手問題はありません 🎉");return}
+ mode="choice";selected=new Set(rows.map(d=>d.era));qIndex=correct=streak=sessionMaxStreak=0;retryDue=[];queue=shuffle(rows);current=null;
+ nextWeakQuestion()
+}
+function nextWeakQuestion(){
+ let rows=data.filter(d=>weak[d.id]&&!learned.has(d.id));
+ if(!rows.length){weakOnly=false;home();toast("苦手問題を全部クリアしました！");return}
+ pool=rows;
+ let dueIndex=retryDue.findIndex(x=>x.due<=qIndex&&rows.some(d=>d.id===x.id));
+ if(dueIndex>=0){let item=retryDue.splice(dueIndex,1)[0];current=rows.find(d=>d.id===item.id)}
+ else{queue=queue.filter(d=>rows.some(x=>x.id===d.id));if(!queue.length)queue=shuffle(rows);current=queue.shift()}
+ answered=false;choice=null;digits="";order=[];renderQuestion()
+}function eligible(){return mode==="choice"?pool.filter(d=>pool.filter(x=>x.year!==d.year&&x.event!==d.event).length>=3):pool}
+function settings(){weakOnly=false;let eras=[...new Set(data.map(d=>d.era))];if(!selected.size)selected=new Set(eras);page(`<button id="mode-back" class="quiet back">← モード選択に戻る</button><div class="eyebrow">出題範囲</div><h1>${modeNames[mode]}</h1><p class="muted">出題する時代を複数選べます。覚えた問題は自動で除外します。</p><div class="row"><button id="all">すべて選ぶ</button><button id="none">すべて外す</button></div><div class="chips">${eras.map((e,i)=>`<label class="check"><input type="checkbox" data-era="${i}" ${selected.has(e)?"checked":""}>${esc(e)} <small>(${data.filter(d=>d.era===e).length})</small></label>`).join("")}</div><p id="count"></p><button id="start" class="primary wide">スタート！</button>`);$("#mode-back").onclick=home;const upd=()=>{pool=data.filter(d=>selected.has(d.era)&&!learned.has(d.id));$("#count").textContent=`現在 ${eligible().length}問が出題可能`;$("#start").disabled=eligible().length<(mode==="order"?2:1)};document.querySelectorAll("[data-era]").forEach(b=>b.onchange=()=>{b.checked?selected.add(eras[b.dataset.era]):selected.delete(eras[b.dataset.era]);upd()});$("#all").onclick=()=>{selected=new Set(eras);document.querySelectorAll("[data-era]").forEach(x=>x.checked=true);upd()};$("#none").onclick=()=>{selected.clear();document.querySelectorAll("[data-era]").forEach(x=>x.checked=false);upd()};$("#start").onclick=()=>{qIndex=correct=streak=sessionMaxStreak=0;retryDue=[];queue=[];current=null;nextQuestion()};upd()}
+function nextQuestion(){pool=data.filter(d=>selected.has(d.era)&&!learned.has(d.id));let e=eligible();if(e.length<(mode==="order"?2:1)){page(`<section class="card"><h2>${pool.length?"出題できる問題が足りません":"この範囲は全部覚えました！ 🎉"}</h2><button id="back" class="primary wide">← 範囲を変える</button></section>`);$("#back").onclick=settings;return}let prev=current?.id;
+let dueIndex=retryDue.findIndex(x=>x.due<=qIndex&&e.some(d=>d.id===x.id)&&x.id!==prev);
+if(dueIndex>=0){let item=retryDue.splice(dueIndex,1)[0];current=e.find(d=>d.id===item.id)}
+else{queue=queue.filter(d=>e.some(x=>x.id===d.id));if(!queue.length)queue=shuffle(e);if(queue.length>1&&queue[0].id===prev)[queue[0],queue[1]]=[queue[1],queue[0]];current=queue.shift()}answered=false;choice=null;digits="";order=[];if(mode==="order"){let sorted=[...pool].sort(compare),anchor=sorted.indexOf(current),n=Math.min(4,sorted.length),start=Math.max(0,Math.min(sorted.length-n,anchor-Math.floor(Math.random()*n)));orderItems=shuffle(sorted.slice(start,start+n));if(orderItems.every((x,i)=>x===sorted[start+i]))orderItems.reverse()}renderQuestion()}
 function renderQuestion(){page(`<button id="back" class="quiet back">← 戻る・範囲を変える</button><div class="session"><span>⚡ <b>${streak}</b> 連続正解</span><span>★ 正解 <b>${correct}</b></span></div><div class="eyebrow">${modeNames[mode]}　${qIndex+1}問目</div><section class="card"><span class="tag">${mode==="order"?"古い → 新しい":esc(current.era)}</span><h2>${mode==="input"?esc(current.event):mode==="choice"?esc(displayYear(current.year))+"のできごとは？":"古い順にタップしよう"}</h2><div id="body"></div><button id="check" class="primary wide" disabled>答え合わせ</button><div id="feedback"></div></section>`);$("#back").onclick=settings;if(mode==="input"){let t=yearInfo(current.year);$("#body").innerHTML=`<label for="year" class="muted">${t.bc?"紀元前の年を入力":t.century?"何世紀？ 数字を入力":"西暦を入力"}</label><input id="year" type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" autocomplete="off" maxlength="4" placeholder="ここをタップして入力">`;$("#year").oninput=e=>{digits=e.target.value.normalize("NFKC").replace(/\D/g,"").slice(0,4);e.target.value=digits;$("#check").disabled=!digits};$("#year").onkeydown=e=>{if(e.key==="Enter"&&digits)check()}}else if(mode==="choice"){let ds=pool.filter(x=>x.year!==current.year&&x.event!==current.event),opts=shuffle([current,...shuffle(ds).slice(0,3)]);$("#body").innerHTML=`<div class="choices">${opts.map(d=>`<button data-opt="${esc(d.id)}">${esc(d.event)}</button>`).join("")}</div>`;document.querySelectorAll("[data-opt]").forEach(b=>b.onclick=()=>{choice=b.dataset.opt;document.querySelectorAll("[data-opt]").forEach(x=>x.classList.toggle("selected",x===b));$("#check").disabled=false})}else renderOrder();$("#check").onclick=check}
 function renderOrder(){$("#body").innerHTML=`<p class="muted">タップした順に①②③④。もう一度タップすると取り消せます。</p><div class="choices">${orderItems.map(d=>{let i=order.indexOf(d.id);return `<button class="order-choice ${i>=0?"selected":""}" data-order="${esc(d.id)}"><span class="badge">${i>=0?["①","②","③","④"][i]:"○"}</span><span>${esc(d.event)}</span></button>`}).join("")}</div>`;document.querySelectorAll("[data-order]").forEach(b=>b.onclick=()=>{let i=order.indexOf(b.dataset.order);i>=0?order.splice(i,1):order.push(b.dataset.order);renderOrder()});$("#check").disabled=order.length!==orderItems.length}
 function answerCard(d,rank=""){return `<div class="answer"><b>${rank}${esc(displayYear(d.year))}${mode==="order"?"":` <small>No.${esc(d.no)}</small>`}</b><p>${esc(d.event)}</p><div class="memory">${esc(d.memory||"暗記法は未登録です。")}</div>${mode!=="order"?`<button class="wide quiet" data-speak="${esc(d.id)}">▶ 暗記法を読み上げ</button><label class="check" style="margin-top:12px"><input type="checkbox" data-learn="${esc(d.id)}" ${learned.has(d.id)?"checked":""}>この問題を覚えた</label>`:""}</div>`}
 function bind(){document.querySelectorAll("[data-learn]").forEach(b=>b.onchange=()=>setLearned(b.dataset.learn,b.checked));document.querySelectorAll("[data-speak]").forEach(b=>b.onclick=()=>speak(b.dataset.speak,b))}
-function check(){if(answered)return;let ok;if(mode==="input")ok=Number(digits)===yearInfo(current.year).n;else if(mode==="choice")ok=choice===current.id;else ok=[...orderItems].sort(compare).every((x,i)=>x.id===order[i]);answered=true;$("#year")?.blur();correct+=ok?1:0;streak=ok?streak+1:0;beep(ok);$("#check").hidden=true;document.querySelectorAll("#body button,#body input").forEach(x=>x.disabled=true);let ans=mode==="order"?[...orderItems].sort(compare):[current];$("#feedback").innerHTML=`<div class="result ${ok?"":"wrong"}">${ok?'<div class="spark">✦　✧　★　✧　✦</div>':""}<h2>${ok?"○ 正解！":"× おしい！"}</h2><p>${ok?(streak>=2?`⚡ ${streak}連続正解！ いいリズム！`:"ナイス！ 知識をひとつチャージ！"):"ここで覚えれば、一歩前進！"}</p>${mode==="order"?"<p>正しい順番 ↓</p>":""}${ans.map((d,i)=>answerCard(d,mode==="order"?`${i+1}. `:"")).join("")}</div><button id="next" class="primary wide">次の問題 →</button>`;bind();$("#next").onclick=()=>{qIndex++;nextQuestion()}}
+function check(){if(answered)return;let ok;if(mode==="input")ok=Number(digits)===yearInfo(current.year).n;else if(mode==="choice")ok=choice===current.id;else ok=[...orderItems].sort(compare).every((x,i)=>x.id===order[i]);answered=true;$("#year")?.blur();correct+=ok?1:0;streak=ok?streak+1:0;
+if(!ok){markWeak(current.id);scheduleRetry(current.id)}
+else if(weak[current.id]&&streak>=1){weak[current.id]=Math.max(0,(weak[current.id]||1)-1);if(!weak[current.id])delete weak[current.id];saveWeak()}
+recordAnswer(ok);beep(ok);$("#check").hidden=true;document.querySelectorAll("#body button,#body input").forEach(x=>x.disabled=true);let ans=mode==="order"?[...orderItems].sort(compare):[current];$("#feedback").innerHTML=`<div class="result ${ok?"":"wrong"}">${ok?'<div class="spark">✦　✧　★　✧　✦</div>':""}<h2>${ok?"○ 正解！":"× おしい！"}</h2><p>${ok?(streak>=2?`⚡ ${streak}連続正解！ いいリズム！`:"ナイス！ 知識をひとつチャージ！"):"ここで覚えれば、一歩前進！"}</p>${mode==="order"?"<p>正しい順番 ↓</p>":""}${ans.map((d,i)=>answerCard(d,mode==="order"?`${i+1}. `:"")).join("")}</div><button id="next" class="primary wide">次の問題 →</button>`;bind();$("#next").onclick=()=>{qIndex++;weakOnly?nextWeakQuestion():nextQuestion()}}
+function calendarView(){
+ let now=new Date(), y=calendarCursor.getFullYear(),m=calendarCursor.getMonth();
+ page(`<button id="back" class="quiet back">← 戻る</button><div class="eyebrow">PROGRESS CALENDAR</div><h1>習熟度カレンダー</h1><p class="muted">その日の最後の全体習熟度を自動で保存します。</p><section class="card"><div class="calendar-head"><button id="prev">‹</button><b>${y}年 ${m+1}月</b><button id="nextm">›</button></div><div class="calendar-grid" id="cal"></div><div id="day-detail"></div></section>`);
+ $("#back").onclick=home;$("#prev").onclick=()=>{calendarCursor=new Date(y,m-1,1);calendarView()};$("#nextm").onclick=()=>{calendarCursor=new Date(y,m+1,1);calendarView()};
+ let grid=$("#cal"),dows=["日","月","火","水","木","金","土"],html=dows.map(x=>`<div class="cal-dow">${x}</div>`).join("");
+ let first=new Date(y,m,1).getDay(),days=new Date(y,m+1,0).getDate();
+ for(let i=0;i<first;i++)html+='<div class="cal-day empty"></div>';
+ for(let d=1;d<=days;d++){let k=`${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`,r=daily[k],isToday=k===localDateKey();html+=`<button class="cal-day ${r?"has":""} ${isToday?"today":""}" data-day="${k}"><span>${d}</span>${r?`<b>${r.endMastery}%</b>`:""}</button>`}
+ grid.innerHTML=html;document.querySelectorAll("[data-day]").forEach(b=>b.onclick=()=>showDay(b.dataset.day))
+}
+function showDay(k){
+ let r=daily[k],box=$("#day-detail");if(!r){box.innerHTML='<div class="day-detail">この日の学習記録はありません。</div>';return}
+ let rate=r.questions?Math.round(r.correct/r.questions*100):0,up=r.endMastery-r.startMastery;
+ box.innerHTML=`<div class="day-detail"><b>${k.replaceAll("-","/")}</b><br>📚 ${r.questions}問　○ 正解 ${r.correct}問（${rate}%）<br>⚡ 最高 ${r.maxStreak}連続　✓ 新しく覚えた ${r.newLearned}問<br>🎯 全体習熟度 ${r.startMastery}% → <b>${r.endMastery}%</b>（${up>=0?"+":""}${up}%）</div>`
+}
 function memoryList(){let eras=[...new Set(data.map(d=>d.era))];page(`<button id="back" class="quiet back">← 戻る</button><div class="eyebrow">04 / 暗記法一覧</div><h1>語呂で、思い出そう。</h1><select id="era">${eras.map(e=>`<option>${esc(e)}</option>`).join("")}</select><input id="search" type="search" placeholder="年代・できごと・暗記法で検索" style="margin-top:10px"><p id="mc" class="muted"></p><div id="mem"></div>`);$("#back").onclick=home;function upd(){let q=$("#search").value.normalize("NFKC").toLowerCase(),era=$("#era").value,rows=data.filter(d=>d.era===era&&[d.year,d.event,d.memory].join(" ").normalize("NFKC").toLowerCase().includes(q)).sort(compare);$("#mc").textContent=`${era}：${rows.length}件`;$("#mem").innerHTML=rows.map(d=>`<section class="card memory-card"><div class="year">${esc(displayYear(d.year))}</div><h2>${esc(d.event)}</h2><div class="memory-box"><small>暗記法</small><p>${esc(d.memory||"暗記法は未登録です。")}</p></div><button class="wide quiet" data-speak="${esc(d.id)}">▶ 暗記法を読み上げ</button><label class="check" style="margin-top:12px"><input type="checkbox" data-learn="${esc(d.id)}" ${learned.has(d.id)?"checked":""}>この問題を覚えた</label></section>`).join("");bind()}$("#era").onchange=upd;$("#search").oninput=upd;upd()}
 function list(only){page(`<button id="back" class="quiet back">← 戻る</button><h1>${only?"覚えた問題":"問題一覧"}</h1><input id="search" type="search" placeholder="年号・できごと・暗記法で検索"><p id="lc"></p><div id="list"></div>`);$("#back").onclick=home;function upd(){let q=$("#search").value.normalize("NFKC").toLowerCase(),rows=data.filter(d=>(!only||learned.has(d.id))&&[d.year,d.era,d.event,d.memory].join(" ").normalize("NFKC").toLowerCase().includes(q));$("#lc").textContent=`${rows.length}件`;$("#list").innerHTML=`<div class="table-wrap"><table><tr><th>覚えた</th><th>年代</th><th>時代</th><th>できごと</th><th>暗記法</th></tr>${rows.map(d=>`<tr><td><input type="checkbox" data-learn="${esc(d.id)}" ${learned.has(d.id)?"checked":""}></td><td>${esc(displayYear(d.year))}</td><td>${esc(d.era)}</td><td>${esc(d.event)}</td><td>${esc(d.memory)}</td></tr>`).join("")}</table></div>`;document.querySelectorAll("[data-learn]").forEach(b=>b.onchange=()=>{setLearned(b.dataset.learn,b.checked);if(only)upd()})}$("#search").oninput=upd;upd()}
 async function init(){try{let r=await fetch("history.csv",{cache:"no-store"});if(!r.ok)throw 0;let rows=parseCSV(await r.text());data=rows.slice(1).filter(r=>r[1]?.trim()&&r[5]?.trim()).map((r,i)=>({id:JSON.stringify([r[0],r[1],r[5]]),row:i,no:r[0],year:r[1].trim(),era:r[2]?.trim()||"時代未設定",event:r[5],memory:r[6]||"",speech:r[7]||""}));soundLabel();home()}catch{page('<section class="card"><h2>history.csvを読み込めませんでした</h2><p>index.htmlとhistory.csvを同じ場所に置いてください。</p></section>')}}
