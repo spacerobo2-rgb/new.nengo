@@ -64,7 +64,7 @@ input[type=search],select,#year{width:100%;padding:13px;border:1.5px solid #bfd0
 /* listen mode */
 .listen-card{text-align:center;overflow:hidden}
 .listen-event{font-size:22px;font-weight:900;line-height:1.55;margin:14px 0 8px}
-.listen-year{font-size:34px;font-weight:950;color:#174795;margin:6px 0}
+.listen-year{font-size:64px;font-weight:950;line-height:1.05;letter-spacing:2px;color:#0b63ce;background:#eef6ff;border:2px solid #cfe3ff;border-radius:18px;padding:12px 8px;margin:12px 0 16px;font-variant-numeric:tabular-nums}
 .listen-memory{background:#f5f8fd;border:1px solid #e0e8f3;border-radius:16px;padding:16px;margin:14px 0;line-height:1.7;text-align:left}
 .listen-memory small{display:block;color:#71839c;font-weight:800;margin-bottom:5px}
 .listen-controls{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:8px;margin-top:12px}
@@ -83,7 +83,7 @@ const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&
 function parseCSV(t){let a=[],r=[],c="",q=false;for(let i=0;i<t.length;i++){let x=t[i];if(x=='"'){if(q&&t[i+1]=='"'){c+='"';i++}else q=!q}else if(x==","&&!q){r.push(c);c=""}else if((x=="\n"||x=="\r")&&!q){if(x=="\r"&&t[i+1]=="\n")i++;r.push(c);if(r.some(v=>v.trim()))a.push(r);r=[];c=""}else c+=x}r.push(c);if(r.some(v=>v.trim()))a.push(r);return a}
 let data=[],learned=new Set(),sound=true,mode="",selected=new Set(),pool=[],queue=[],current=null,orderItems=[],order=[],digits="",choice=null,answered=false,qIndex=0,correct=0,streak=0,speaking=null,audioCtx=null;
 let weak={},daily={},retryDue=[],sessionMaxStreak=0,calendarCursor=new Date(),weakOnly=false;
-let listenRows=[],listenIndex=0,listenActive=false,listenToken=0;
+let listenRows=[],listenIndex=0,listenActive=false,listenToken=0,listenOrder="random";
 const WEAK_KEY="toki-history-weak-v1", DAILY_KEY="toki-history-daily-v1";
 try{
 learned=new Set(JSON.parse(localStorage.getItem(KEY)||"[]"));
@@ -194,22 +194,27 @@ function stopListen(goHome=false){
 function listenSettings(){
  stopListen(false);
  let eras=[...new Set(data.map(d=>d.era))];
- page(`<button id="back" class="quiet back">← 戻る</button><div class="eyebrow">LISTEN & LEARN</div><h1>🎧 聞き流しモード</h1><p class="muted">選んだ時代をランダムに、1項目につき2回ずつ読み上げます。</p><section class="card"><h2>読み上げる時代</h2><div class="checks">${eras.map(e=>`<label><input type="checkbox" value="${esc(e)}" checked> ${esc(e)}</label>`).join("")}</div><div class="row"><button id="none">すべて外す</button><button id="all">すべて選ぶ</button></div><button id="listen-start" class="primary wide" style="margin-top:14px">▶ 聞き流しスタート</button></section>`);
+ page(`<button id="back" class="quiet back">← 戻る</button><div class="eyebrow">LISTEN & LEARN</div><h1>🎧 聞き流しモード</h1><p class="muted">選んだ時代をランダムに、1項目につき2回ずつ読み上げます。</p><section class="card"><h2>読み上げる時代</h2><div class="checks">${eras.map(e=>`<label><input type="checkbox" value="${esc(e)}" checked> ${esc(e)}</label>`).join("")}</div><div class="row"><button id="none">すべて外す</button><button id="all">すべて選ぶ</button></div><h2 style="margin-top:18px">流す順番</h2><div class="row"><button id="listen-random" class="primary">🔀 ランダム</button><button id="listen-number">① 番号順</button></div></section>`);
  $("#back").onclick=home;
  $("#none").onclick=()=>document.querySelectorAll('.checks input').forEach(x=>x.checked=false);
  $("#all").onclick=()=>document.querySelectorAll('.checks input').forEach(x=>x.checked=true);
- $("#listen-start").onclick=()=>{
+ const startListen=(order)=>{
    let sel=[...document.querySelectorAll('.checks input:checked')].map(x=>x.value);
    if(!sel.length){toast("時代を1つ以上選んでください");return}
-   listenRows=shuffle(data.filter(d=>sel.includes(d.era)&&d.speech));
+   let rows=data.filter(d=>sel.includes(d.era)&&d.speech);
+   if(order==="number") rows=[...rows].sort((a,b)=>(Number(a.no)||0)-(Number(b.no)||0));
+   else rows=shuffle(rows);
+   listenRows=rows;listenOrder=order;
    if(!listenRows.length){toast("読み上げデータがありません");return}
    listenIndex=0;listenActive=true;listenToken++;renderListen();playListenCurrent()
- }
+ };
+ $("#listen-random").onclick=()=>startListen("random");
+ $("#listen-number").onclick=()=>startListen("number");
 }
 function renderListen(){
  let d=listenRows[listenIndex];if(!d)return;
  page(`<button id="listen-back" class="quiet back">← 終了</button><div class="eyebrow">LISTEN & LEARN</div><h1>🎧 聞き流し中</h1>
- <section class="card listen-card"><div class="listen-status">${listenIndex+1} / ${listenRows.length}　・　${esc(d.era)}</div><div class="listen-event">${esc(d.event)}</div><div class="listen-year">${esc(d.date)}</div><div class="listen-memory"><small>暗記法</small>${esc((d.memory??"").toString())}</div></section>
+ <section class="card listen-card"><div class="listen-status">${listenIndex+1} / ${listenRows.length}　・　${esc(d.era)}　・　${listenOrder==="number"?"番号順":"ランダム"}</div><div class="listen-event">${esc(d.event)}</div><div class="listen-year">${esc(d.date)}</div><div class="listen-memory"><small>暗記法</small>${esc((d.memory??"").toString())}</div></section>
  <div class="listen-controls"><button id="listen-prev">≪ 戻る</button><button id="listen-stop">■ ストップ</button><button id="listen-skip">早送り ≫</button></div>`);
  $("#listen-back").onclick=()=>stopListen(true);
  $("#listen-stop").onclick=()=>{
@@ -245,7 +250,7 @@ async function playListenCurrent(){
 function advanceListen(){
  if(!listenActive)return;
  listenIndex++;
- if(listenIndex>=listenRows.length){listenRows=shuffle(listenRows);listenIndex=0}
+ if(listenIndex>=listenRows.length){if(listenOrder==="random")listenRows=shuffle(listenRows);listenIndex=0}
  listenToken++;renderListen();playListenCurrent()
 }
 function calendarView(){
