@@ -60,6 +60,17 @@ input[type=search],select,#year{width:100%;padding:13px;border:1.5px solid #bfd0
 .retry-note{background:#fff5db;border:1px solid #f1d481;color:#6c5312;border-radius:12px;padding:10px 12px;margin-top:12px;font-size:13px;font-weight:700}
 @media(max-width:380px){.era-line{grid-template-columns:72px 1fr 42px}.cal-day{min-height:52px;padding:4px 2px}.today-grid{gap:7px}}
 
+
+/* listen mode */
+.listen-card{background:linear-gradient(145deg,#0f397a,#176fe8);color:white;text-align:center;overflow:hidden}
+.listen-event{font-size:22px;font-weight:900;line-height:1.55;margin:14px 0 8px}
+.listen-year{font-size:34px;font-weight:950;color:#fff4b0;margin:6px 0}
+.listen-memory{background:#ffffff18;border:1px solid #ffffff35;border-radius:16px;padding:16px;margin:14px 0;line-height:1.7;text-align:left}
+.listen-memory small{display:block;color:#cfe2ff;font-weight:800;margin-bottom:5px}
+.listen-controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.listen-controls button{min-height:50px}
+.listen-status{font-size:13px;color:#d9e8ff;margin-top:8px}
+
 </style>
 </head>
 <body>
@@ -72,6 +83,7 @@ const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&
 function parseCSV(t){let a=[],r=[],c="",q=false;for(let i=0;i<t.length;i++){let x=t[i];if(x=='"'){if(q&&t[i+1]=='"'){c+='"';i++}else q=!q}else if(x==","&&!q){r.push(c);c=""}else if((x=="\n"||x=="\r")&&!q){if(x=="\r"&&t[i+1]=="\n")i++;r.push(c);if(r.some(v=>v.trim()))a.push(r);r=[];c=""}else c+=x}r.push(c);if(r.some(v=>v.trim()))a.push(r);return a}
 let data=[],learned=new Set(),sound=true,mode="",selected=new Set(),pool=[],queue=[],current=null,orderItems=[],order=[],digits="",choice=null,answered=false,qIndex=0,correct=0,streak=0,speaking=null,audioCtx=null;
 let weak={},daily={},retryDue=[],sessionMaxStreak=0,calendarCursor=new Date(),weakOnly=false;
+let listenRows=[],listenIndex=0,listenActive=false,listenToken=0;
 const WEAK_KEY="toki-history-weak-v1", DAILY_KEY="toki-history-daily-v1";
 try{
 learned=new Set(JSON.parse(localStorage.getItem(KEY)||"[]"));
@@ -129,6 +141,7 @@ function home(){
  snapshotMastery();
  let pct=masteryPct(),t=todayRecord(),rate=t.questions?Math.round(t.correct/t.questions*100):0,weakCount=data.filter(d=>weak[d.id]&&!learned.has(d.id)).length;
  page(`<section class="hero"><div class="eyebrow">HISTORY / LEVEL UP</div><h1>ひらめく。覚える。<br><em>歴史がつながる！</em></h1><p class="muted">昨日の自分を、1％ずつ追い越そう。</p></section>
+ <button id="listen-mode" class="primary wide" style="margin:8px 0 16px">🎧 聞き流しモード <small style="display:block;font-weight:700;opacity:.85">2回ずつ読み上げ・暗記法を表示</small></button>
  <section class="card mastery-card"><div class="mastery-top"><div><small style="color:#dceaff">全体習熟度</small><div class="mastery-big">${pct}%</div></div><b>${data.filter(d=>learned.has(d.id)).length} / ${data.length}</b></div><div class="progress"><i style="width:${pct}%"></i></div></section>
  <section class="card"><div class="eyebrow">TODAY</div><h2 style="margin:6px 0">今日の記録</h2><div class="today-grid"><div>解いた問題<b>${t.questions}問</b></div><div>正解率<b>${rate}%</b></div><div>最高連続<b>${t.maxStreak}問</b></div><div>習熟度UP<b>${Math.max(0,t.endMastery-t.startMastery)}%</b></div></div></section>
  <div class="modes">${Object.entries(modeNames).map(([k,v],i)=>`<button class="mode" data-mode="${k}"><span class="num">0${i+1}</span><span><b>${v}</b><small>${["iPhoneの数字キーボードで入力","4つの選択肢から選ぶ","古い順にタップして①②③④"][i]}</small></span></button>`).join("")}<button class="mode" id="memory-list"><span class="num">04</span><span><b>暗記法一覧</b><small>時代ごとに語呂合わせを見直す</small></span></button>
@@ -138,7 +151,7 @@ function home(){
  <div class="row" style="margin-top:12px"><button id="all-list">すべての問題</button><button id="learned-list">覚えた問題</button></div><button id="reset-data" class="wide quiet" style="margin-top:12px">⚙ 学習データをリセット</button>`);
  document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{mode=b.dataset.mode;settings()});
  $("#memory-list").onclick=memoryList;$("#all-list").onclick=()=>list(false);$("#learned-list").onclick=()=>list(true);
- $("#calendar").onclick=calendarView;$("#weak-mode").onclick=weakTraining;$("#reset-data").onclick=resetConfirm
+ $("#calendar").onclick=calendarView;$("#weak-mode").onclick=weakTraining;$("#listen-mode").onclick=listenSettings;$("#reset-data").onclick=resetConfirm
 }function resetConfirm(){
  page(`<button id="cancel-reset" class="quiet back">← 戻る</button><section class="card"><div class="eyebrow">RESET</div><h1>学習データをリセットしますか？</h1><p>「覚えた」、苦手問題、今日の記録、習熟度カレンダーがすべて消えます。<br><b>この操作は元に戻せません。</b></p><button id="reset-final" class="primary wide">すべての学習データを消す</button><button id="reset-no" class="wide quiet" style="margin-top:10px">やめる</button></section>`);
  $("#cancel-reset").onclick=$("#reset-no").onclick=home;
@@ -172,6 +185,61 @@ function check(){if(answered)return;let ok;if(mode==="input")ok=Number(digits)==
 if(!ok){markWeak(current.id);scheduleRetry(current.id)}
 else if(weak[current.id]&&streak>=1){weak[current.id]=Math.max(0,(weak[current.id]||1)-1);if(!weak[current.id])delete weak[current.id];saveWeak()}
 recordAnswer(ok);beep(ok);$("#check").hidden=true;document.querySelectorAll("#body button,#body input").forEach(x=>x.disabled=true);let ans=mode==="order"?[...orderItems].sort(compare):[current];$("#feedback").innerHTML=`<div class="result ${ok?"":"wrong"}">${ok?'<div class="spark">✦　✧　★　✧　✦</div>':""}<h2>${ok?"○ 正解！":"× おしい！"}</h2><p>${ok?(streak>=2?`⚡ ${streak}連続正解！ いいリズム！`:"ナイス！ 知識をひとつチャージ！"):mode==="input"&&!digits?"わからなくてもOK。答えを見て覚えよう！":"ここで覚えれば、一歩前進！"}</p>${mode==="order"?"<p>正しい順番 ↓</p>":""}${ans.map((d,i)=>answerCard(d,mode==="order"?`${i+1}. `:"")).join("")}</div><button id="next" class="primary wide">次の問題 →</button>`;bind();if(mode==="input"){let b=document.querySelector(`[data-speak="${CSS.escape(current.id)}"]`);if(b)setTimeout(()=>speak(current.id,b),180)}$("#next").onclick=()=>{qIndex++;weakOnly?nextWeakQuestion():nextQuestion()}}
+
+function stopListen(goHome=false){
+ listenActive=false;listenToken++;
+ try{speechSynthesis.cancel()}catch{}
+ if(goHome)home()
+}
+function listenSettings(){
+ stopListen(false);
+ let eras=[...new Set(data.map(d=>d.era))];
+ page(`<button id="back" class="quiet back">← 戻る</button><div class="eyebrow">LISTEN & LEARN</div><h1>🎧 聞き流しモード</h1><p class="muted">選んだ時代をランダムに、1項目につき2回ずつ読み上げます。</p><section class="card"><h2>読み上げる時代</h2><div class="checks">${eras.map(e=>`<label><input type="checkbox" value="${esc(e)}" checked> ${esc(e)}</label>`).join("")}</div><div class="row"><button id="none">すべて外す</button><button id="all">すべて選ぶ</button></div><button id="listen-start" class="primary wide" style="margin-top:14px">▶ 聞き流しスタート</button></section>`);
+ $("#back").onclick=home;
+ $("#none").onclick=()=>document.querySelectorAll('.checks input').forEach(x=>x.checked=false);
+ $("#all").onclick=()=>document.querySelectorAll('.checks input').forEach(x=>x.checked=true);
+ $("#listen-start").onclick=()=>{
+   let sel=[...document.querySelectorAll('.checks input:checked')].map(x=>x.value);
+   if(!sel.length){toast("時代を1つ以上選んでください");return}
+   listenRows=shuffle(data.filter(d=>sel.includes(d.era)&&d.speech));
+   if(!listenRows.length){toast("読み上げデータがありません");return}
+   listenIndex=0;listenActive=true;listenToken++;renderListen();playListenCurrent()
+ }
+}
+function renderListen(){
+ let d=listenRows[listenIndex];if(!d)return;
+ page(`<button id="listen-back" class="quiet back">← 終了</button><div class="eyebrow">LISTEN & LEARN</div><h1>🎧 聞き流し中</h1>
+ <section class="card listen-card"><div class="listen-status">${listenIndex+1} / ${listenRows.length}　・　${esc(d.era)}</div><div class="listen-event">${esc(d.event)}</div><div class="listen-year">${esc(d.date)}</div><div class="listen-memory"><small>暗記法</small>${esc(d.mnemonic||"暗記法は未登録です。")}</div></section>
+ <div class="listen-controls"><button id="listen-stop">■ ストップ</button><button id="listen-skip" class="primary">≫ 早送り</button></div>`);
+ $("#listen-back").onclick=()=>stopListen(true);
+ $("#listen-stop").onclick=()=>{stopListen(false);$("#listen-stop").textContent="停止しました";$("#listen-stop").disabled=true};
+ $("#listen-skip").onclick=()=>{if(!listenActive)return;listenToken++;try{speechSynthesis.cancel()}catch{};advanceListen()}
+}
+function speakPromise(text,token){
+ return new Promise(resolve=>{
+   if(!listenActive||token!==listenToken){resolve();return}
+   if(!("speechSynthesis" in window)||!("SpeechSynthesisUtterance" in window)){resolve();return}
+   let u=new SpeechSynthesisUtterance(text);u.lang="ja-JP";u.rate=.88;
+   u.onend=resolve;u.onerror=resolve;speechSynthesis.speak(u)
+ })
+}
+async function playListenCurrent(){
+ let token=listenToken,d=listenRows[listenIndex];if(!d||!listenActive)return;
+ await speakPromise(d.speech,token);
+ if(!listenActive||token!==listenToken)return;
+ await new Promise(r=>setTimeout(r,650));
+ if(!listenActive||token!==listenToken)return;
+ await speakPromise(d.speech,token);
+ if(!listenActive||token!==listenToken)return;
+ await new Promise(r=>setTimeout(r,900));
+ if(listenActive&&token===listenToken)advanceListen()
+}
+function advanceListen(){
+ if(!listenActive)return;
+ listenIndex++;
+ if(listenIndex>=listenRows.length){listenRows=shuffle(listenRows);listenIndex=0}
+ listenToken++;renderListen();playListenCurrent()
+}
 function calendarView(){
  let now=new Date(), y=calendarCursor.getFullYear(),m=calendarCursor.getMonth();
  page(`<button id="back" class="quiet back">← 戻る</button><div class="eyebrow">PROGRESS CALENDAR</div><h1>習熟度カレンダー</h1><p class="muted">その日の最後の全体習熟度を自動で保存します。</p><section class="card"><div class="calendar-head"><button id="prev">‹</button><b>${y}年 ${m+1}月</b><button id="nextm">›</button></div><div class="calendar-grid" id="cal"></div><div id="day-detail"></div></section>`);
