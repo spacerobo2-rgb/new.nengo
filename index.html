@@ -209,7 +209,7 @@ function listenSettings(){
 function renderListen(){
  let d=listenRows[listenIndex];if(!d)return;
  page(`<button id="listen-back" class="quiet back">← 終了</button><div class="eyebrow">LISTEN & LEARN</div><h1>🎧 聞き流し中</h1>
- <section class="card listen-card"><div class="listen-status">${listenIndex+1} / ${listenRows.length}　・　${esc(d.era)}</div><div class="listen-event">${esc(d.event)}</div><div class="listen-year">${esc(d.date)}</div><div class="listen-memory"><small>暗記法</small>${esc((d.mnemonic??d.g??d.G??"").toString())}</div></section>
+ <section class="card listen-card"><div class="listen-status">${listenIndex+1} / ${listenRows.length}　・　${esc(d.era)}</div><div class="listen-event">${esc(d.event)}</div><div class="listen-year">${esc(d.date)}</div><div class="listen-memory"><small>暗記法</small>${esc((d.memory??"").toString())}</div></section>
  <div class="listen-controls"><button id="listen-prev">≪ 戻る</button><button id="listen-stop">■ ストップ</button><button id="listen-skip">早送り ≫</button></div>`);
  $("#listen-back").onclick=()=>stopListen(true);
  $("#listen-stop").onclick=()=>{
